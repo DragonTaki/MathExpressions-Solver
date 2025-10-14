@@ -6,19 +6,13 @@
 // Update Date: 2025/10/05
 // Version: v1.0
 /* ----- ----- ----- ----- */
-/* ----- ----- ----- ----- */
-// test_constraints.cpp
-// Test for Constraint.cpp logging behaviors
-// Author: DragonTaki
-// Create Date: 2025/10/05
-// Version: v1.0
-/* ----- ----- ----- ----- */
 
 #include <iostream>
 #include <vector>
 #include <string>
-#include "../src/Constraint.h"
-#include "../src/AppLogger.h"
+
+#include "core/AppLogger.h"
+#include "logic/Constraint.h"
 
 // 測試輔助函數
 void runTest(

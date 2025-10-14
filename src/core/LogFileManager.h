@@ -14,56 +14,78 @@
 
 /**
  * @class LogFileManager
- * @brief A thread-safe logging utility for writing messages to a log file.
+ * @brief Thread-safe logging utility for writing messages to a file.
  *
- * This class provides static methods for initializing a log file,
- * writing timestamped messages, and safely shutting down the log system.
+ * <summary>
+ * LogFileManager provides static methods for:
+ * - Initializing a log file
+ * - Writing timestamped log messages
+ * - Safely shutting down the logging system
+ * </summary>
  *
- * Example usage:
- * @code
+ * <remarks>
+ * This is a static-only utility class; instantiation is disabled.
+ * All operations are thread-safe via an internal mutex.
+ * Each log line is prepended with a timestamp.
+ * </remarks>
+ *
+ * <example>
  * LogFileManager::Initialize("app.log");
  * LogFileManager::Write("Application started.");
  * LogFileManager::Shutdown();
- * @endcode
+ * </example>
  */
 class LogFileManager {
 public:
     /**
-     * @brief Initializes the log file.
-     * @param filename Path to the log file.
+     * @brief Initializes the log file for writing.
      *
-     * Opens the specified log file in append mode.
-     * Should be called once at program start.
+     * <summary>
+     * Opens the specified file in append mode.
+     * If already initialized, the call is ignored.
+     * Writes a session header with timestamp to the log file.
+     * </summary>
+     *
+     * @param filename Full path to the log file.
+     * @return true if the log file was successfully opened or already open; false otherwise.
      */
     static bool Initialize(const std::string& filename);
 
     /**
-     * @brief Writes a message to the log file with a timestamp.
-     * @param line The message to write.
+     * @brief Writes a timestamped log message to the file.
      *
-     * Thread-safe. Automatically adds a newline at the end.
+     * <summary>
+     * Each message is prepended with a timestamp in format "YYYY-MM-DD HH:MM:SS".
+     * Thread-safe. Automatically flushes the output stream after writing.
+     * </summary>
+     *
+     * @param line The message to write to the log file.
      */
     static void Write(const std::string& line);
 
     /**
-     * @brief Closes the log file safely.
+     * @brief Shuts down the logging system.
      *
+     * <summary>
+     * Writes a session footer with timestamp and closes the file stream safely.
      * Should be called before program exit to release resources.
+     * </summary>
      */
     static void Shutdown();
 
     /**
-     * @brief Get the current active log file path.
-     * @return The log file path as a string.
+     * @brief Retrieves the current active log file path.
+     *
+     * @return Path to the currently open log file as a string.
      */
     static std::string GetLogPath();
 
 private:
-    // Disable instantiation (static-only utility class)
+    // Prevent instantiation
     LogFileManager() = delete;
     ~LogFileManager() = delete;
 
-    static std::ofstream ofs_;     ///< Active file stream
-    static std::mutex mutex_;      ///< Thread-safety lock
+    static std::ofstream ofs_;     ///< File stream for writing logs
+    static std::mutex mutex_;      ///< Mutex to ensure thread-safety
     static std::string logPath_;   ///< Current log file path
 };

@@ -186,11 +186,11 @@ void CandidateGenerator::generateLeftTokens(
     {
         std::string ops;
         for (char o : operators) ops.push_back(o), ops.push_back(' ');
-        AppLogger::Log(fmt::format("[generateLeftTokens] lhsLen={}, operators=[{}], depth={}", lhsLen, ops, depth), LogLevel::Debug);
+        AppLogger::Debug(fmt::format("[generateLeftTokens] lhsLen={}, operators=[{}], depth={}", lhsLen, ops, depth));
         if (allowed)
-            AppLogger::Log(fmt::format("[generateLeftTokens] allowed vector size = {}", (int)allowed->size()), LogLevel::Debug);
+            AppLogger::Debug(fmt::format("[generateLeftTokens] allowed vector size = {}", (int)allowed->size()));
         if (lhsConstraintsMap)
-            AppLogger::Log(fmt::format("[generateLeftTokens] constraintsMap size = {}", (int)lhsConstraintsMap->size()), LogLevel::Debug);
+            AppLogger::Debug(fmt::format("[generateLeftTokens] constraintsMap size = {}", (int)lhsConstraintsMap->size()));
     }
 
     // ----------------------------
@@ -435,9 +435,9 @@ void CandidateGenerator::generateLeftTokens(
     // ----------------------------
     // Step 4: Start recursion
     // ----------------------------
-    AppLogger::Log("[generateLeftTokens] === START DFS ===", LogLevel::Debug);
+    AppLogger::Debug("[generateLeftTokens] === START DFS ===");
     genTokens(0, true, false);
-    AppLogger::Log(fmt::format("[generateLeftTokens] Finished: generated {} lhsCandidates", lhsCandidates.size()), LogLevel::Debug);
+    AppLogger::Debug(fmt::format("[generateLeftTokens] Finished: generated {} lhsCandidates", lhsCandidates.size()));
 }
 
 std::vector<string> CandidateGenerator::generate(
@@ -469,18 +469,42 @@ std::vector<string> CandidateGenerator::generate(
     for (auto& [ch, con] : constraintsMap) {
         if (con.minCount == 0 && con.maxCount == 0) {
             forbidden.insert(ch);
-            AppLogger::Log(fmt::format("[Constraint] '{}' is forbidden (min=max=0)", ch), LogLevel::Debug);
+            AppLogger::Debug(fmt::format("[Constraint] '{}' is forbidden (min=max=0)", ch));
         }
     }
 
-    // loop eqPos from right to left
-    for (int eqPos = length - 2; eqPos >= 3; --eqPos) {
+    //尋找green '='
+    int fixedEqPos = -1;
+    for (size_t i = 0; i < expressions.size(); ++i) {
+        const std::string& expr = expressions[i];
+        const std::string& color = colors[i];
+        for (size_t j = 0; j < expr.size(); ++j) {
+            if (expr[j] == '=' && color[j] == 'g') {
+                fixedEqPos = static_cast<int>(j);
+                break;
+            }
+        }
+        if (fixedEqPos != -1) break; // 找到第一個 green '=' 就可以了
+    }
+
+    std::vector<int> eqPositions;
+    if (fixedEqPos != -1) {
+        AppLogger::Debug(fmt::format("[eqPos] eqPos has fixed position at {}", fixedEqPos));
+        eqPositions.push_back(fixedEqPos); // 直接固定
+    } else {
+        AppLogger::Debug(fmt::format("[eqPos] eqPos does not has fixed position, will traverse it"));
+        for (int eqPos = length - 2; eqPos >= 3; --eqPos) {
+            eqPositions.push_back(eqPos);
+        }
+    }
+
+    for (int eqPos : eqPositions) {
         int lhsLen = eqPos;
         int rhsLen = length - eqPos - 1;
 
         // skip impossible rhs by length feasibility (call your isRhsLengthFeasible)
         if (!isRhsLengthFeasible(lhsLen, rhsLen, operators)) {
-            AppLogger::Log(fmt::format("[Skip eqPos={}] unrealistic rhsLen {}", eqPos, rhsLen), LogLevel::Debug);
+            AppLogger::Debug(fmt::format("[Skip eqPos={}] unrealistic rhsLen {}", eqPos, rhsLen));
             continue;
         }
 
@@ -507,28 +531,28 @@ std::vector<string> CandidateGenerator::generate(
 
         // rest as before: eval each lhs, skip negatives, check rhs length and feedback
         for (auto& lhs : lhsCandidates) {
-            AppLogger::Log(fmt::format("[Try] LHS='{}' (eqPos={}, lhsLen={})", lhs, eqPos, lhsLen), LogLevel::Debug);
+            AppLogger::Debug(fmt::format("[Try] LHS='{}' (eqPos={}, lhsLen={})", lhs, eqPos, lhsLen));
 
             long long lhsResult;
             try {
                 lhsResult = validator.evalExpr(lhs);
             } catch (const std::exception& e) {
-                AppLogger::Log(fmt::format("[Eval Fail] {} : {}", lhs, e.what()), LogLevel::Debug);
+                AppLogger::Debug(fmt::format("[Eval Fail] {} : {}", lhs, e.what()));
                 continue;
             } catch (...) {
-                AppLogger::Log(fmt::format("[Eval Fail] {} : unknown error", lhs), LogLevel::Debug);
+                AppLogger::Debug(fmt::format("[Eval Fail] {} : unknown error", lhs));
                 continue;
             }
 
             // 1) 立刻排除負數（遊戲規則：RHS 不會是負數）
             if (lhsResult < 0) {
-                AppLogger::Log(fmt::format("[Reject Negative] {} => {}", lhs, lhsResult), LogLevel::Debug);
+                AppLogger::Debug(fmt::format("[Reject Negative] {} => {}", lhs, lhsResult));
                 continue;
             }
 
             std::string rhs = to_string(lhsResult);
             if ((int)rhs.size() != rhsLen) {
-                AppLogger::Log(fmt::format("[Reject] {}={} -> rhs length {} != {}", lhs, rhs, (int)rhs.size(), rhsLen), LogLevel::Debug);
+                AppLogger::Debug(fmt::format("[Reject] {}={} -> rhs length {} != {}", lhs, rhs, (int)rhs.size(), rhsLen));
                 continue;
             }
 
@@ -536,13 +560,13 @@ std::vector<string> CandidateGenerator::generate(
             bool ok = true;
             for (std::size_t i = 0; i < expressions.size(); ++i) {
                 if (!matchesFeedback(candidate, expressions[i], colors[i])) {
-                    AppLogger::Log(fmt::format("[Reject] {} mismatch vs guess '{}' (fb='{}')", candidate, expressions[i], colors[i]), LogLevel::Debug);
+                    AppLogger::Debug(fmt::format("[Reject] {} mismatch vs guess '{}' (fb='{}')", candidate, expressions[i], colors[i]));
                     ok = false;
                     break;
                 }
             }
             if (ok) {
-                AppLogger::Log(fmt::format("[Accept] {}", candidate), LogLevel::Info);
+                AppLogger::Info(fmt::format("[Accept] {}", candidate));
                 finalCandidates.push_back(candidate);
             }
         } // for lhsCandidates

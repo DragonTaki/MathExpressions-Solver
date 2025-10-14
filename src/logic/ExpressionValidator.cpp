@@ -17,41 +17,88 @@
 
 using namespace std;
 
-// ---- Operator utils ----
-int precedence(char op) {
-    if (op == '^') return 3;
-    if (op == '*' || op == '/') return 2;
-    if (op == '+' || op == '-') return 1;
-    return 0;
-}
-
-bool isLeftAssociative(char op) {
-    return (op != '^'); // '^' is right-associative
-}
-
-long long applyOp(long long a, long long b, char op) {
-    switch (op) {
-        case '+': return a + b;
-        case '-': return a - b;
-        case '*': return a * b;
-        case '/':
-            if (b == 0) throw runtime_error("Division by zero");
-            return a / b;
-        case '^': {
-            if (b < 0) throw runtime_error("Negative exponent not supported");
-            long long res = 1;
-            for (int i = 0; i < b; i++) res *= a;
-            return res;
-        }
+namespace {
+    /**
+     * @brief Get operator precedence.
+     *
+     * <summary>
+     * Defines standard arithmetic operator precedence:
+     * '^' > '*' '/' > '+' '-'.
+     * </summary>
+     *
+     * @param op Operator character ('+', '-', '*', '/', '^')
+     * @return int Precedence level (higher = higher priority)
+     */
+    int precedence(char op) {
+        if (op == '^') return 3;
+        if (op == '*' || op == '/') return 2;
+        if (op == '+' || op == '-') return 1;
+        return 0;
     }
-    throw runtime_error("Invalid operator");
-}
+
+    /**
+     * @brief Checks whether an operator is left-associative.
+     *
+     * <summary>
+     * In this evaluator, all operators are left-associative
+     * except for '^' which is right-associative.
+     * </summary>
+     *
+     * @param op Operator character
+     * @return true if left-associative; false if right-associative
+     */
+    bool isLeftAssociative(char op) {
+        return (op != '^'); // '^' is right-associative
+    }
+
+    /**
+     * @brief Applies a binary operator to two operands.
+     *
+     * @param a Left-hand operand
+     * @param b Right-hand operand
+     * @param op Operator character ('+', '-', '*', '/', '^')
+     * @return long long Result of the operation
+     * @throws runtime_error On invalid operator, division by zero, or negative exponent
+     */
+    long long applyOp(long long a, long long b, char op) {
+        switch (op) {
+            case '+': return a + b;
+            case '-': return a - b;
+            case '*': return a * b;
+            case '/':
+                if (b == 0) throw runtime_error("Division by zero");
+                return a / b;
+            case '^': {
+                if (b < 0) throw runtime_error("Negative exponent not supported");
+                long long res = 1;
+                for (int i = 0; i < b; i++) res *= a;
+                return res;
+            }
+        }
+        throw runtime_error("Invalid operator");
+    }
+} // anonymous namespace
 
 // ---- Shunting Yard + RPN Evaluate ----
+
+/**
+ * @brief Evaluates an arithmetic expression string and returns the result.
+ *
+ * <summary>
+ * This function uses the Shunting Yard algorithm to convert infix expressions
+ * to Reverse Polish Notation (RPN) and then evaluates the RPN.
+ *
+ * Supports operators: +, -, *, /, ^ (exponentiation)
+ * Supports multi-digit integers.
+ *
+ * @param s Expression string (e.g., "12+3*4")
+ * @return long long Evaluation result
+ * @throws runtime_error If expression contains invalid characters, malformed RPN, or illegal operations
+ */
 long long ExpressionValidator::evalExpr(const string& s) {
-    vector<string> output;
-    stack<char> opsStack;
-    string num;
+    vector<string> output;   // RPN output queue
+    stack<char> opsStack;    // Operator stack
+    string num;              // Buffer for multi-digit numbers
 
     auto flushNum = [&]() {
         if (!num.empty()) {
@@ -60,6 +107,7 @@ long long ExpressionValidator::evalExpr(const string& s) {
         }
     };
 
+    // --- Shunting Yard Algorithm ---
     for (char c : s) {
         if (isdigit(c)) {
             num.push_back(c);
@@ -84,6 +132,7 @@ long long ExpressionValidator::evalExpr(const string& s) {
         opsStack.pop();
     }
 
+    // --- RPN Evaluation ---
     stack<long long> st;
     for (auto& token : output) {
         if (isdigit(token[0])) {
@@ -99,6 +148,17 @@ long long ExpressionValidator::evalExpr(const string& s) {
     return st.top();
 }
 
+/**
+ * @brief Safely evaluates an expression and returns optional result.
+ *
+ * <summary>
+ * Wraps evalExpr in try-catch to prevent exceptions from propagating.
+ * Returns std::nullopt if evaluation fails.
+ * </summary>
+ *
+ * @param expr Expression string
+ * @return std::optional<long long> Evaluation result if successful; std::nullopt otherwise
+ */
 std::optional<long long> ExpressionValidator::safeEval(const std::string& expr) {
     try {
         ExpressionValidator validator;
@@ -110,6 +170,22 @@ std::optional<long long> ExpressionValidator::safeEval(const std::string& expr) 
 }
 
 // ---- Public API ----
+
+/**
+ * @brief Checks whether a string is a valid arithmetic equation.
+ *
+ * <summary>
+ * Validates if the string:
+ * 1. Has exactly 'n' characters
+ * 2. Contains exactly one '='
+ * 3. Has non-empty left and right sides
+ * 4. Left and right sides evaluate to the same value
+ * </summary>
+ *
+ * @param s Expression string (e.g., "12+35=47")
+ * @param n Expected length of expression
+ * @return true if valid equation; false otherwise
+ */
 bool ExpressionValidator::isValidExpression(const string& s, int n) {
     if ((int)s.size() != n) return false;
 

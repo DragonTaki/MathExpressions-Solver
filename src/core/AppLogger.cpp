@@ -17,13 +17,7 @@
 
 std::mutex AppLogger::logMutex;
 
-// --- Internal default settings ---
-namespace {
-    constexpr const char* DEFAULT_LOG_FOLDER = "log";
-    constexpr const char* DEFAULT_LOG_FILENAME_TEMPLATE = "runtime_log_{year}-{month}-{day}_{hour}.{minute}.{second}.log";
-}
-
-// --- Shortcuts ---
+// --- Convenience logging shortcuts ---
 void AppLogger::Trace(const std::string& msg) { Log(msg, LogLevel::Trace); }
 void AppLogger::Debug(const std::string& msg) { Log(msg, LogLevel::Debug); }
 void AppLogger::Info(const std::string& msg)  { Log(msg, LogLevel::Info);  }
@@ -45,6 +39,7 @@ void AppLogger::Initialize()
 
 /**
  * @brief Initialize logger with a user-specified folder or filename.
+ * @param folderOrFile Path to folder or file. Folder mode if no extension detected, otherwise file mode.
  */
 void AppLogger::Initialize(const std::string& folderOrFile)
 {
@@ -59,13 +54,13 @@ void AppLogger::Initialize(const std::string& folderOrFile)
     }
     else if (folderOrFile.find('.') == std::string::npos)
     {
-        // folder mode
+        // Folder mode
         folder = folderOrFile;
         std::filesystem::create_directories(folder);
     }
     else
     {
-        // file mode
+        // File mode
         std::filesystem::path provided = folderOrFile;
         folder = provided.parent_path().empty() ? DefaultFolder : provided.parent_path();
         filenameTemplate = provided.filename().string();
@@ -77,8 +72,8 @@ void AppLogger::Initialize(const std::string& folderOrFile)
 }
 
 /**
- * @brief Common helper used by both Initialize() overloads.
- * @param filePath Full log file path.
+ * @brief Internal helper to initialize LogFileManager.
+ * @param filePath Full path to the log file.
  */
 void AppLogger::InitializeFileManager(const std::filesystem::path& filePath)
 {
@@ -92,29 +87,38 @@ void AppLogger::InitializeFileManager(const std::filesystem::path& filePath)
     }
 }
 
+/**
+ * @brief Shutdown logger and flush logs.
+ */
 void AppLogger::Shutdown() {
     AppLogger::Info("Logger shutting down.");
     LogFileManager::Shutdown();
 }
 
-// --- Construct LogRecord ---
+/**
+ * @brief Construct a LogRecord with timestamp.
+ * @param msg Message string.
+ * @param lvl LogLevel.
+ */
 LogRecord::LogRecord(const std::string& msg, LogLevel lvl)
     : message(msg), level(lvl)
 {
     auto now = std::chrono::system_clock::now();
     auto time = std::chrono::system_clock::to_time_t(now);
     std::tm tm{};
+
 #ifdef _WIN32
     localtime_s(&tm, &time);
 #else
     localtime_r(&time, &tm);
 #endif
+
     std::ostringstream oss;
     oss << std::put_time(&tm, "%H:%M:%S");
     timestamp = oss.str();
 }
 
-// --- Static Config ---
+// --- Auto shutdown via RAII ---
 namespace {
     struct AppLoggerFinalizer {
         ~AppLoggerFinalizer() {
@@ -131,7 +135,11 @@ void AppLogger::EnableTestMode(bool enabled) {
     testMode_ = enabled;
 }
 
-// --- Logging Entry Point ---
+/**
+ * @brief Primary logging function.
+ * @param message Message string.
+ * @param level Severity level.
+ */
 void AppLogger::Log(const std::string& message, LogLevel level) {
     if (level < minLevel_) return;
     std::lock_guard<std::mutex> lock(mutex_);
@@ -139,7 +147,10 @@ void AppLogger::Log(const std::string& message, LogLevel level) {
     Print(record);
 }
 
-// --- Internal Print ---
+/**
+ * @brief Print log record to console and file with color.
+ * @param record LogRecord instance.
+ */
 void AppLogger::Print(const LogRecord& record) {
     std::string label = GetLevelLabel(record.level);
     LogColor color = GetLevelColor(record.level);
@@ -161,11 +172,10 @@ void AppLogger::Print(const LogRecord& record) {
               << ColorToAnsi(LogColor::Default) << std::endl;
 #endif
 
-    // File: 直接寫入已格式化好的字串（LogFileManager 不會再加時間）
     LogFileManager::Write(outLine);
 }
 
-// --- Helpers ---
+// ----- Helper Functions -----
 std::string AppLogger::GetLevelLabel(LogLevel level) {
     switch (level) {
     case LogLevel::Trace: return "[TRACE]";

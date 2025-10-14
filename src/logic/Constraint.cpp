@@ -18,21 +18,23 @@
 /**
  * @brief Validates whether a candidate expression matches the expected color feedback pattern.
  *
+ * <summary>
  * This function checks if a candidate string conforms to a given expression and its corresponding color feedback,
- * similar to "Wordle"-style validation but adapted for expression-based rules (digits and operators).
+ * similar to "Wordle"-style validation but adapted for expressions containing digits and operators.
  *
- * The rules:
- * - 'g' (green): exact match at this position.
- * - 'y' (yellow): character exists in candidate but at a different position.
- * - 'r' (red): character does not exist in the candidate.
- * - '=' (equal sign): must appear only once and exactly at the correct position.
- * - All other operators must be within the allowed operator set.
+ * Rules:
+ * - 'g' (green): character must match exactly at this position.
+ * - 'y' (yellow): character must exist in candidate but at a different position.
+ * - 'r' (red): character should not appear in candidate.
+ * - '=': must appear exactly once and at the correct position.
+ * - Only allowed operators from allowedOps are permitted.
+ * </summary>
  *
- * @param candidate The candidate expression string being tested.
- * @param expression The target expression string to match against.
- * @param color A color feedback string consisting of 'g', 'y', 'r' characters.
- * @param allowedOps A set of valid operator characters (e.g., '+', '-', '*', '/').
- * @return true if the candidate matches the feedback rules; false otherwise.
+ * @param candidate The candidate expression string to test (e.g., "12+46=58").
+ * @param expression The guessed/target expression (e.g., "12+35=47").
+ * @param color Feedback string corresponding to the guess ('g', 'y', 'r').
+ * @param allowedOps Set of valid operator characters (e.g., '+', '-', '*', '/').
+ * @return true if the candidate satisfies the feedback rules; false otherwise.
  */
 bool matchesFeedback(
     const std::string& candidate,
@@ -40,9 +42,10 @@ bool matchesFeedback(
     const std::string& color,
     const std::unordered_set<char>& allowedOps
 ) {
-    AppLogger::Log(std::format("Candidate = '{}', expression & color = '{} -> {}'", candidate, expression, color), LogLevel::Debug);
+    // Debug log for current candidate evaluation
+    AppLogger::Debug(std::format("Candidate = '{}', expression & color = '{} -> {}'", candidate, expression, color));
 
-    // Check if length is matched
+    // Validate string lengths
     if (candidate.size() != expression.size() || expression.size() != color.size()) {
         AppLogger::Log(std::format("Mismatched length: candidate length={}, expression length={}, color length={}",
             candidate.size(), expression.size(), color.size()),
@@ -50,36 +53,32 @@ bool matchesFeedback(
         return false;
     }
 
-    // Count for character occurrences
-    // Used later to validate yellow/red counts and prevent overmatching
+    // Count occurrences of each character in candidate for later validation
     std::unordered_map<char, int> candCount;
     for (char c : candidate) candCount[c]++;
 
-    // Check green first
-    // If color is green, the characters must match exactly
+    // --- Step 1: Validate green positions ---
     std::vector<bool> used(candidate.size(), false);
     for (size_t i = 0; i < candidate.size(); ++i) {
         if (color[i] == 'g') {
-            // Mismatch on a green-marked character → invalid
-            if (candidate[i] != expression[i]) {
+            if (candidate[i] != expression[i]) {  // Exact match required
                 AppLogger::Log(std::format(
                     "Expected green match failed at position '{}': candidate='{}', expression='{}'",
                     i, candidate[i], expression[i]), LogLevel::Error);
                 return false;
             }
-            // Consume one occurrence of this character from candidate's count
-            candCount[expression[i]]--;
+            candCount[expression[i]]--;  // Consume occurrence
             used[i] = true;
         }
     }
 
-    // Check yellow / red
+    // --- Step 2: Validate yellow/red positions ---
     for (size_t i = 0; i < candidate.size(); ++i) {
         if (color[i] == 'g') continue;  // Skip already validated green positions
 
         char ch = expression[i];
 
-        // '=' must appear once and in correct position
+        // '=' must be at correct position
         if (ch == '=') {
             if (candidate[i] != '=') {
                 AppLogger::Log(std::format("Invalid '=' position at location '{}'.", i), LogLevel::Error);
@@ -88,16 +87,14 @@ bool matchesFeedback(
             continue;
         }
 
-        // Only symbols within allowedOps (e.g. + - * /) are permitted.
+        // Only symbols within allowedOps (e.g. + - * /) are permitted
         if (!isdigit(ch) && allowedOps.count(ch) == 0) {
             AppLogger::Log(std::format("Disallowed operator '{}' at location '{}'.", ch, i), LogLevel::Error);
             return false;
         }
 
         // Handle yellow and red feedback
-        if (color[i] == 'y') {
-            // Yellow means character exists elsewhere in candidate
-            // Candidate No remaining occurrences
+        if (color[i] == 'y') {  // Yellow validation
             if (candCount[ch] <= 0) {
                 AppLogger::Log(std::format("Symbol '{}' exceeds allowed occurrences at location '{}'.", ch, i), LogLevel::Error);
                 return false;
@@ -109,38 +106,41 @@ bool matchesFeedback(
             }
             // Consume one occurrence of this character from candidate's count
             candCount[ch]--;
-        } else if (color[i] == 'r') {
-            // Red means this character should not appear in candidate at all
-            // Red candidate shows up
-            if (candCount[ch] > 0) {
+        } else if (color[i] == 'r') {  // Red validation
+            if (candCount[ch] > 0) {  // Character should not exist
                 AppLogger::Log(std::format("Invalid symbol presence '{}' at location '{}'.", ch, i), LogLevel::Error);
                 return false;
             }
         } else {
-            // Invalid color character (must be one of 'g'/'y'/'r')
+            // Invalid color character (must be one of 'g', 'y' or 'r')
             AppLogger::Log(std::format("Unknown feedback color '{}' at location '{}'.", color[i], i), LogLevel::Error);
             return false;
         }
     }
 
-    return true;
+    return true;   // Candidate satisfies all feedback rules
 }
 
 /**
- * @brief Derives positional and count constraints for each symbol based on feedback history.
+ * @brief Derives constraints for each symbol based on multiple feedback pairs.
  *
- * This function analyzes multiple expression–color feedback pairs (like multiple Wordle rounds)
- * and summarizes the constraints on each character (digits and operators).
+ * <summary>
+ * Given a history of guessed expressions and their color feedbacks,
+ * this function summarizes positional and count constraints for each symbol.
  *
  * For each symbol:
- * - Tracks all positions where it must appear ('green' positions).
- * - Tracks positions where it must NOT appear ('yellow' or 'red' positions).
- * - Updates the minimum and maximum number of times it can appear based on all feedback.
+ * - greenPos: positions it must occupy (green feedback)
+ * - bannedPos: positions it cannot occupy (yellow/red feedback)
+ * - minCount: minimum occurrences across all feedback
+ * - maxCount: maximum occurrences across all feedback
  *
- * @param expressions A list of past expression guesses (each same length).
- * @param colors A list of corresponding color feedback strings ('g', 'y', 'r').
- * @param length The expected expression length (used as an upper bound for counts).
- * @return std::unordered_map<char, Constraint> Mapping from each symbol to its derived constraints.
+ * '=' is enforced to appear exactly once.
+ * </summary>
+ *
+ * @param expressions Vector of past guesses.
+ * @param colors Vector of corresponding feedback strings ('g', 'y', 'r').
+ * @param length Total length of each expression (used for maxCount bounds).
+ * @return std::unordered_map<char, Constraint> Mapping from symbol to its derived Constraint.
  */
 std::unordered_map<char, Constraint> deriveConstraints(
     const std::vector<std::string>& expressions,
@@ -150,13 +150,13 @@ std::unordered_map<char, Constraint> deriveConstraints(
     const int INF = length;  // Maximum reasonable bound for character occurrences
     std::unordered_map<char, Constraint> constraintsMap;
 
-    // Initialize all possible characters
+    // Initialize all digits and operators with default Constraint
     for (char c = '0'; c <= '9'; ++c)
         constraintsMap[c] = Constraint(length);
     for (char c : std::string("+-*/^="))
         constraintsMap[c] = Constraint(length);
 
-    // Process each feedback record
+    // Process each guess-feedback pair
     for (size_t i = 0; i < expressions.size(); ++i) {
         const std::string& expression = expressions[i];
         const std::string& colorFeedback = colors[i];
@@ -215,6 +215,7 @@ std::unordered_map<char, Constraint> deriveConstraints(
         }
     }
 
+    // '=' must appear exactly once
     if (constraintsMap.contains('=')) {
         constraintsMap['='].minCount = 1;
         constraintsMap['='].maxCount = 1;
