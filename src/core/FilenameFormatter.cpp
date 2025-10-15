@@ -7,10 +7,11 @@
 // Version: v1.0
 /* ----- ----- ----- ----- */
 
-#include "FilenameFormatter.h"
 #include <ctime>
-#include <sstream>
 #include <iomanip>
+#include <sstream>
+
+#include "FilenameFormatter.h"
 
 namespace FilenameFormatter
 {

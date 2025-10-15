@@ -8,8 +8,8 @@
 /* ----- ----- ----- ----- */
 
 #include <iostream>
-#include <vector>
 #include <string>
+#include <vector>
 
 #include "core/AppLogger.h"
 #include "logic/Constraint.h"
@@ -32,6 +32,7 @@ void runTest(
 
 int main() {
     AppLogger::EnableTestMode(true);
+    LogFileManager::SetSilentMode(true);
     AppLogger::SetLogLevel(LogLevel::Debug);
 
     std::unordered_set<char> allowedOps = { '+', '-', '*', '/', '^' };
@@ -94,7 +95,7 @@ int main() {
         "Invalid color symbol",
         "1+2=3", "1+2=3", "gxbgy", allowedOps, false
     );
-
+    
     // =====================
     // ✅ deriveConstraints 測試
     // =====================
@@ -103,20 +104,113 @@ int main() {
         std::vector<std::string> expressions = { "1+2=3", "1+3=4" };
         std::vector<std::string> colors = { "ggggg", "ggygr" };
 
+        // 🧩 顯示測資
+        std::cout << "\nTest Data:\n";
+        for (size_t i = 0; i < expressions.size(); ++i)
+            std::cout << "  " << expressions[i] << " -> " << colors[i] << std::endl;
+
         auto constraints = deriveConstraints(expressions, colors, 5);
 
+        // 📊 顯示結果
+        std::cout << "\nDerived Constraints:\n";
         for (auto& kv : constraints) {
             const auto& symbol = kv.first;
             const auto& cst = kv.second;
-            std::cout << "Symbol: " << symbol
-                      << " | MinCount: " << cst.minCount
-                      << " | MaxCount: " << cst.maxCount
-                      << " | GreenPos: " << cst.greenPos.size()
-                      << " | BannedPos: "
-                      << std::count(cst.bannedPos.begin(), cst.bannedPos.end(), true)
-                      << std::endl;
+            std::cout << "  Symbol: " << symbol
+                    << " | MinCount: " << cst.minCount()
+                    << " | MaxCount: " << cst.maxCount()
+                    << " | GreenPos: " << cst.greenPos().size()
+                    << " | BannedPos: " << std::count(cst.bannedPos().begin(), cst.bannedPos().end(), true)
+                    << " | Conflict: " << (cst.hasConflict() ? "YES" : "NO")
+                    << std::endl;
         }
     }
+
+    // =====================
+    // ⚠️ deriveConstraints 衝突測試
+    // =====================
+    {
+        std::cout << "\n===== deriveConstraints() conflict test =====" << std::endl;
+
+        // 1️⃣ 數字 r/g/y 衝突（多次出現 1）
+        {
+            std::vector<std::string> expressions = { "11+23=34", "11+12=23", "11+34=45" };
+            std::vector<std::string> colors      = { "gyrrrgrr", "gyrrrgrr", "grrrrgrr" };
+
+            std::cout << "\nTest 1: Digit r/g/y conflict (1 repeated)\n";
+            std::cout << "Test Data:\n";
+            for (size_t i = 0; i < expressions.size(); ++i)
+                std::cout << "  " << expressions[i] << " -> " << colors[i] << std::endl;
+
+            auto constraints = deriveConstraints(expressions, colors, 8);
+
+            std::cout << "\nDerived Constraints:\n";
+            for (auto& kv : constraints) {
+                const auto& symbol = kv.first;
+                const auto& cst = kv.second;
+                std::cout << "  Symbol: " << symbol
+                        << " | MinCount: " << cst.minCount()
+                        << " | MaxCount: " << cst.maxCount()
+                        << " | GreenPos: " << cst.greenPos().size()
+                        << " | BannedPos: " << std::count(cst.bannedPos().begin(), cst.bannedPos().end(), true)
+                        << " | Conflict: " << (cst.hasConflict() ? "YES" : "NO")
+                        << std::endl;
+            }
+        }
+
+        // 2️⃣ 相鄰綠色符號衝突
+        {
+            std::vector<std::string> expressions = { "11+2=13", "2+11=13" };
+            std::vector<std::string> colors      = { "rrgrgrr", "rgrrgrr" };
+
+            std::cout << "\nTest 2: Adjacent green symbol conflict\n";
+            std::cout << "Test Data:\n";
+            for (size_t i = 0; i < expressions.size(); ++i)
+                std::cout << "  " << expressions[i] << " -> " << colors[i] << std::endl;
+
+            auto constraints = deriveConstraints(expressions, colors, 7);
+
+            std::cout << "\nDerived Constraints:\n";
+            for (auto& kv : constraints) {
+                const auto& symbol = kv.first;
+                const auto& cst = kv.second;
+                std::cout << "  Symbol: " << symbol
+                        << " | MinCount: " << cst.minCount()
+                        << " | MaxCount: " << cst.maxCount()
+                        << " | GreenPos: " << cst.greenPos().size()
+                        << " | BannedPos: " << std::count(cst.bannedPos().begin(), cst.bannedPos().end(), true)
+                        << " | Conflict: " << (cst.hasConflict() ? "YES" : "NO")
+                        << std::endl;
+            }
+        }
+
+        // 3️⃣ r/y 衝突案例（同一數字不同位置 r/y 不一致）
+        {
+            std::vector<std::string> expressions = { "12+35=47", "12+36=48" };
+            std::vector<std::string> colors      = { "yyrrrygr", "yryrrygr" };
+
+            std::cout << "\nTest 3: r/y conflict for same digit\n";
+            std::cout << "Test Data:\n";
+            for (size_t i = 0; i < expressions.size(); ++i)
+                std::cout << "  " << expressions[i] << " -> " << colors[i] << std::endl;
+
+            auto constraints = deriveConstraints(expressions, colors, 8);
+
+            std::cout << "\nDerived Constraints:\n";
+            for (auto& kv : constraints) {
+                const auto& symbol = kv.first;
+                const auto& cst = kv.second;
+                std::cout << "  Symbol: " << symbol
+                        << " | MinCount: " << cst.minCount()
+                        << " | MaxCount: " << cst.maxCount()
+                        << " | GreenPos: " << cst.greenPos().size()
+                        << " | BannedPos: " << std::count(cst.bannedPos().begin(), cst.bannedPos().end(), true)
+                        << " | Conflict: " << (cst.hasConflict() ? "YES" : "NO")
+                        << std::endl;
+            }
+        }
+    }
+
 
     std::cout << "\n===== All tests complete. =====" << std::endl;
     return 0;

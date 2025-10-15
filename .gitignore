@@ -78,6 +78,7 @@ _ReSharper*/
 *.exe
 *.dll
 *.pdb
+*.obj
 
 # Others
 *.cache

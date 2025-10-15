@@ -8,10 +8,13 @@ cl ^
 /Zc:__cplusplus ^
 /EHsc ^
 /utf-8 ^
+/I"../src" ^
 /I"../external/fmtlib/fmt_12.0.0" ^
 ../external/fmtlib/fmt_12.0.0/src/fmt.cpp ^
-../src/AppLogger.cpp ^
-../src/Constraint.cpp ^
+../src/core/AppLogger.cpp ^
+../src/core/FilenameFormatter.cpp ^
+../src/core/LogFileManager.cpp ^
+../src/logic/Constraint.cpp ^
 test_constraints.cpp ^
 /Fe:test_constraints.exe
 

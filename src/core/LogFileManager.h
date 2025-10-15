@@ -73,6 +73,9 @@ public:
      */
     static void Shutdown();
 
+    static void SetSilentMode(bool enabled);
+    static bool IsSilentMode();
+
     /**
      * @brief Retrieves the current active log file path.
      *
@@ -84,6 +87,8 @@ private:
     // Prevent instantiation
     LogFileManager() = delete;
     ~LogFileManager() = delete;
+    
+    static inline bool silentMode = false;
 
     static std::ofstream ofs_;     ///< File stream for writing logs
     static std::mutex mutex_;      ///< Mutex to ensure thread-safety

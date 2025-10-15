@@ -7,11 +7,12 @@
 // Version: v1.0
 /* ----- ----- ----- ----- */
 
-#include "LogFileManager.h"
-#include <iostream>
 #include <chrono>
-#include <iomanip>
 #include <ctime>
+#include <iomanip>
+#include <iostream>
+
+#include "LogFileManager.h"
 
 namespace fs = std::filesystem;
 
@@ -70,6 +71,14 @@ bool LogFileManager::Initialize(const std::string& filename) {
     return true;
 }
 
+void LogFileManager::SetSilentMode(bool enabled) {
+    silentMode = enabled;
+}
+
+bool LogFileManager::IsSilentMode() {
+    return silentMode;
+}
+
 /**
  * @brief Writes a message to the log file with timestamp.
  * @param line The message string to write.
@@ -77,6 +86,10 @@ bool LogFileManager::Initialize(const std::string& filename) {
  */
 void LogFileManager::Write(const std::string& line) {
     std::lock_guard<std::mutex> lock(mutex_);  // Ensure thread-safety
+
+    if (silentMode) {  // Pass function if in silent mode
+        return;
+    }
 
     if (!ofs_.is_open()) {  // Log file not initialized
         std::cerr << "[LogFileManager] Log file not initialized. Message skipped: "

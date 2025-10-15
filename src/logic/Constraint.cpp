@@ -10,10 +10,12 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <stdexcept>
 #include <format>
 #include <unordered_set>
-#include "core/AppLogger.h"
+
 #include "Constraint.h"
+#include "core/AppLogger.h"
 
 /**
  * @brief Validates whether a candidate expression matches the expected color feedback pattern.
@@ -122,103 +124,228 @@ bool matchesFeedback(
 }
 
 /**
- * @brief Derives constraints for each symbol based on multiple feedback pairs.
+ * @brief Updates a BaseConstraint based on a single feedback color at a given position.
  *
  * <summary>
- * Given a history of guessed expressions and their color feedbacks,
- * this function summarizes positional and count constraints for each symbol.
+ * This simplified version of `updateConstraint()` only records positional information
+ * without handling count-based logic. It is intended to be called for each symbol
+ * within a single guess-feedback pair.
  *
- * For each symbol:
- * - greenPos: positions it must occupy (green feedback)
- * - bannedPos: positions it cannot occupy (yellow/red feedback)
- * - minCount: minimum occurrences across all feedback
- * - maxCount: maximum occurrences across all feedback
+ * Parameters:
+ * - `bc` : The BaseConstraint object to update.
+ * - `color` : Feedback character ('g', 'y', or 'r').
+ *     - 'g' (green): Character must appear at this position.
+ *     - 'y' (yellow): Character exists but not at this position.
+ *     - 'r' (red): Character does not exist at this position.
+ * - `pos` : Position index in the current expression.
  *
- * '=' is enforced to appear exactly once.
+ * The function marks positional constraints:
+ * - Green positions are stored in `greenPos`.
+ * - Yellow/red positions are flagged as banned in `bannedPos`.
+ */
+inline void updateConstraint(
+    BaseConstraint& bc,
+    char color,
+    int pos)
+{
+    // Record positional constraints according to color feedback
+    if (color == 'g') {
+        bc.greenPos.push_back(pos);  // Green: must appear here at this exact position
+    } else if (color == 'y') {
+        bc.bannedPos[pos] = true;    // Yellow: cannot appear here, but exists elsewhere
+    } else if (color == 'r') {
+        bc.bannedPos[pos] = true;    // Red: cannot appear here (or not at all)
+    }
+}
+
+/**
+ * @brief Processes a single guess-feedback pair and updates constraint states.
+ *
+ * <summary>
+ * For each character in the guessed expression:
+ * - Updates positional constraints (via `updateConstraint()`).
+ * - Tracks per-character feedback counts (green/yellow/red).
+ * After processing all positions, determines the minimum and maximum occurrence
+ * bounds for each symbol based on feedback combinations.
+ *
+ * Conflict detection:
+ * - If previously established exact bounds are contradicted by new feedback, the
+ *   constraint is marked as conflicting and loosened (expanded) to preserve consistency.
+ * - All detected conflicts are logged through `AppLogger::Warn()`.
  * </summary>
  *
- * @param expressions Vector of past guesses.
+ * @param expression Current guessed expression string.
+ * @param color Corresponding feedback string ('g', 'y', 'r').
+ * @param constraintsMap Mapping of character → Constraint structure (digit/symbol).
+ * @param greenSymbolFlags Boolean vector marking which positions contain green operators.
+ * @param INF Large integer representing "unknown upper bound" for max counts.
+ * @param globalConflict Reference flag that becomes true if any conflict is found.
+ */
+void processSingleGuess(
+    const std::string& expression,
+    const std::string& color,
+    std::unordered_map<char, Constraint>& constraintsMap,
+    std::vector<bool>& greenSymbolFlags,
+    int INF,
+    bool& globalConflict)
+{
+    // Initialize local counters for feedback color statistics
+    std::unordered_map<char,int> greenCount;
+    std::unordered_map<char,int> yellowCount;
+    std::unordered_map<char,int> redCount;
+
+    // Iterate over each charactor in single guess-feedback pair
+    for (size_t pos = 0; pos < expression.size(); ++pos) {
+        char charactor = expression[pos];
+        char charactorColor = std::tolower(static_cast<unsigned char>(color[pos]));
+
+        // Apply position-specific constraint update
+        if (std::isdigit(charactor)) {
+            updateConstraint(constraintsMap[charactor].digit, charactorColor, (int)pos);
+        } else if (std::string("+-*/^").find(charactor) != std::string::npos) {
+            updateConstraint(constraintsMap[charactor].symbol, charactorColor, (int)pos);
+
+            // Flag green operator location for structure conflict check
+            if (charactorColor == 'g')
+                greenSymbolFlags[pos] = true;
+        }
+
+        // Count color occurrences
+        switch(charactorColor) {
+            case 'g': greenCount[charactor]++;  break;
+            case 'y': yellowCount[charactor]++; break;
+            case 'r': redCount[charactor]++;    break;
+        }
+    }
+
+    // Update min/max for charactor, and check conflicts
+    for (auto& [symbol,constraint] : constraintsMap) {
+        int g = greenCount[symbol];
+        int y = yellowCount[symbol];
+        int r = redCount[symbol];
+
+        int oldMin = constraint.minCount();
+        int oldMax = constraint.maxCount();
+        int newMinCandidate = g + y;  // min >= 'g'+'y'
+        int newMaxCandidate = INF;    // max <= INF, before being checked
+
+        // max => decided by if 'r' or 'g'/'y' appears
+        if (r > 0) {
+            if (g + y > 0)  // Some 'r' and some 'g'/'y' => max = 'g'+'y'
+                newMaxCandidate = g + y;
+            else            // Only 'r' => max = 0
+                newMaxCandidate = 0;
+        } else {            // Only 'g'/'y' => max unknown
+            //newMaxCandidate = oldMax;
+        }
+
+        // Detect contradictory constraints (Conflict check)
+        bool previouslyBounded = (oldMin == oldMax);  // If already known exact number of occurrences
+        if (previouslyBounded &&
+            (newMinCandidate > oldMin || newMaxCandidate < oldMax))  // And bound changed => conflicts
+        {
+            if (!constraint.hasConflict()) {
+                constraint.hasConflict() = true;
+                globalConflict = true;
+            }
+            AppLogger::Warn(std::format(
+                "Constraint conflict: symbol '{}' had bounded min/max ({}..{}); new guess tried to change to ({}..{})",
+                symbol, oldMin, oldMax, newMinCandidate, newMaxCandidate));
+        }
+
+        // Write back
+        if (!constraint.hasConflict()) {  // Directly write back if no conflict
+            constraint.minCount() = newMinCandidate;
+            constraint.maxCount() = newMaxCandidate;
+        } else {  // Loosen the bound if conflict happened
+            constraint.minCount() = (std::min)(newMinCandidate, oldMin);
+            constraint.maxCount() = (std::max)(newMaxCandidate, oldMax);
+        }
+    }
+}
+
+/**
+ * @brief Derives global symbol constraints across multiple guess-feedback pairs.
+ *
+ * <summary>
+ * This function aggregates constraints from multiple Wordle-like guesses
+ * to build a comprehensive mapping of symbol restrictions:
+ * - Positional constraints (greenPos, bannedPos)
+ * - Count-based constraints (minCount, maxCount)
+ * - Conflict detection and logging
+ *
+ * Additional structural checks:
+ * - Detects adjacent green operators (invalid syntax patterns).
+ * - Enforces '=' to appear exactly once.
+ * </summary>
+ *
+ * @param expressions Vector of all past guess expressions.
  * @param colors Vector of corresponding feedback strings ('g', 'y', 'r').
- * @param length Total length of each expression (used for maxCount bounds).
- * @return std::unordered_map<char, Constraint> Mapping from symbol to its derived Constraint.
+ * @param length Total length of each expression.
+ * @return std::unordered_map<char, Constraint> A map of symbol → derived constraints.
  */
 std::unordered_map<char, Constraint> deriveConstraints(
     const std::vector<std::string>& expressions,
     const std::vector<std::string>& colors,
     int length)
 {
-    const int INF = length;  // Maximum reasonable bound for character occurrences
-    std::unordered_map<char, Constraint> constraintsMap;
+    const int INF = length;                                ///< Reasonable upper bound for symbol occurrences
+    std::unordered_map<char, Constraint> constraintsMap;   ///< Final result container
+    bool globalConflict = false;                           ///< Tracks global conflict status
+    std::vector<bool> greenSymbolFlags(length, false);     ///< Marks green operators for structure validation
 
     // Initialize all digits and operators with default Constraint
     for (char c = '0'; c <= '9'; ++c)
-        constraintsMap[c] = Constraint(length);
+        constraintsMap[c].digit = DigitConstraint(length);
     for (char c : std::string("+-*/^="))
-        constraintsMap[c] = Constraint(length);
+        constraintsMap[c].symbol = SymbolConstraint(length);
 
     // Process each guess-feedback pair
     for (size_t i = 0; i < expressions.size(); ++i) {
         const std::string& expression = expressions[i];
-        const std::string& colorFeedback = colors[i];
+        const std::string& color = colors[i];
+        AppLogger::Debug(std::format("Start derive constraint: {} -> {}", expression, color));
         
-        if (expression.size() != colorFeedback.size()) {
-            AppLogger::Log(std::format("Expression length mismatch at index {}", i), LogLevel::Error);
+        // Length check, if no match than ignore this pair
+        if (expression.size() != length) {
+            AppLogger::Error(std::format("Expression length mismatch at index {}, should be length {}", i, length));
+            continue;
+        } else if (color.size() != length) {
+            AppLogger::Error(std::format("Color length mismatch at index {}, should be length {}", i, length));
             continue;
         }
 
-        // Count total occurrences and "green/yellow" appearances for each symbol in this round
-        std::unordered_map<char, int> totalCount;       // Total count of each character in expression
-        std::unordered_map<char, int> validColorCount;  // Count of characters marked green or yellow
+        // Accumulate constraint updates for this round
+        processSingleGuess(expression, color, constraintsMap, greenSymbolFlags, INF, globalConflict);
+    }
 
-        // Analyze position-based constraints
-        for (int pos = 0; pos < static_cast<int>(expression.size()); ++pos) {
-            char symbol = expression[pos];
-            char color = std::tolower(static_cast<unsigned char>(colorFeedback[pos]));
-            totalCount[symbol]++;
+    // Structural validation
+    for (size_t pos = 1; pos < greenSymbolFlags.size(); ++pos) {
+        if (greenSymbolFlags[pos] && greenSymbolFlags[pos - 1]) {
+            AppLogger::Warn(std::format(
+                "Cross-guess adjacent green symbol conflict between pos {} and {}",
+                pos - 1, pos));
+            globalConflict = true;
 
-            // Green or yellow means the character exists somewhere in candidate
-            if (color == 'g' || color == 'y')
-                validColorCount[symbol]++;
-
-            // Record green position (must match)
-            if (color == 'g')
-                constraintsMap[symbol].greenPos.push_back(pos);
-
-            // Record banned positions (yellow/red cannot appear here)
-            if (color == 'y' || color == 'r')
-                constraintsMap[symbol].bannedPos[pos] = true;
-        }
-
-        // Update global min/max occurrence constraints
-        for (auto& [symbol, total] : totalCount) {
-            int validCount = validColorCount.count(symbol) ? validColorCount[symbol] : 0;
-
-
-            // minCount: must appear at least as many times as green+yellow in this guess
-            constraintsMap[symbol].minCount = (std::max)(constraintsMap[symbol].minCount, validCount);
-
-            // Determine per-guess max:
-            // - if validCount == 0 => symbol not present at all (max = 0)
-            // - if validCount < total  => some occurrences were red -> exact upper bound = validCount
-            // - if validCount == total => no definite upper bound from this guess (use length)
-            int perGuessMax;
-            if (validCount == 0) {
-                perGuessMax = 0;
-            } else if (validCount < total) {
-                perGuessMax = validCount; // definite upper bound
-            } else { // validCount == total
-                perGuessMax = length; // no new info on upper bound
+            // Mark all symbol constraints as conflicted (since we can’t know which operator caused it)
+            for (auto& [symbol, constraint] : constraintsMap) {
+                constraint.symbol.structure.hasConflict = true;
+                constraint.symbol.structure.conflictPositions.push_back(pos - 1);
+                constraint.symbol.structure.conflictPositions.push_back(pos);
             }
-
-            // Narrow global maxCount only when this guess provides a definite upper bound
-            constraintsMap[symbol].maxCount = (std::min)(constraintsMap[symbol].maxCount, perGuessMax);
         }
     }
 
     // '=' must appear exactly once
     if (constraintsMap.contains('=')) {
-        constraintsMap['='].minCount = 1;
-        constraintsMap['='].maxCount = 1;
+        constraintsMap['='].symbol.minCount = 1;
+        constraintsMap['='].symbol.maxCount = 1;
+    } else {
+        throw std::runtime_error("'=' not show in constraints map.");
+    }
+
+    if (globalConflict) {
+        AppLogger::Warn("Detected conflicts in some constraints.");
     }
 
     return constraintsMap;

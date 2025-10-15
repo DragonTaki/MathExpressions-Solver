@@ -7,13 +7,14 @@
 // Version: v2.0
 /* ----- ----- ----- ----- */
 
-#include "AppLogger.h"
-#include "LogFileManager.h"
-#include "FilenameFormatter.h"
 #include <chrono>
 #include <ctime>
 #include <filesystem>
 #include <iostream>
+
+#include "AppLogger.h"
+#include "LogFileManager.h"
+#include "FilenameFormatter.h"
 
 std::mutex AppLogger::logMutex;
 

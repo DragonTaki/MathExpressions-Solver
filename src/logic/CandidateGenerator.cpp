@@ -11,16 +11,25 @@
 #include <functional>
 #include <stdexcept>
 #include <unordered_map>
-#include "core/AppLogger.h"
+
 #include "CandidateGenerator.h"
 #include "Constraint.h"
 #include "ExpressionValidator.h"
+#include "core/AppLogger.h"
 
 #define FMT_HEADER_ONLY
 #include "core.h"
 #include "ranges.h"
 
 using namespace std;
+
+struct GuessConflictInfo
+{
+    std::vector<std::unordered_set<char>> greenCandidates;
+    bool eqPosConsistent = true;
+    int fixedEqPos = -1;
+    bool hasGreenConflict = false;
+};
 
 CandidateGenerator::CandidateGenerator(ExpressionValidator& validator)
     : validator(validator) {}
@@ -173,6 +182,59 @@ bool CandidateGenerator::isRhsLengthFeasible(int lhsLen, int rhsLen, const std::
     return maxDigits >= rhsLen;
 }
 
+/* ----- 新增輔助函數：分析所有 guess 衝突 ----- */
+static GuessConflictInfo analyzeGuessConflicts(const std::vector<std::string>& guesses,
+                                               const std::vector<std::string>& feedbacks)
+{
+    GuessConflictInfo info;
+
+    if (guesses.empty())
+        return info;
+
+    size_t maxLen = guesses[0].size();
+    info.greenCandidates.resize(maxLen);
+
+    std::unordered_set<int> eqPositions; // '=' green positions
+
+    for (size_t i = 0; i < guesses.size(); ++i)
+    {
+        const std::string& g = guesses[i];
+        const std::string& fb = feedbacks[i];
+
+        for (size_t j = 0; j < g.size(); ++j)
+        {
+            if (fb[j] == 'g')
+            {
+                info.greenCandidates[j].insert(g[j]);
+                if (g[j] == '=')
+                    eqPositions.insert(static_cast<int>(j));
+            }
+        }
+    }
+
+    // 檢查 green 衝突
+    for (const auto& set : info.greenCandidates)
+    {
+        if (set.size() > 1)
+        {
+            info.hasGreenConflict = true;
+            break;
+        }
+    }
+
+    // 檢查 '=' 位置一致性
+    if (eqPositions.size() == 1)
+    {
+        info.fixedEqPos = *eqPositions.begin();
+    }
+    else if (eqPositions.size() > 1)
+    {
+        info.eqPosConsistent = false;
+    }
+
+    return info;
+}
+
 void CandidateGenerator::generateLeftTokens(
     int lhsLen,
     const std::unordered_set<char>& operators,
@@ -199,8 +261,8 @@ void CandidateGenerator::generateLeftTokens(
     std::unordered_map<char,int> remainingMin;
     if (lhsConstraintsMap) {
         for (const auto& [ch, con] : *lhsConstraintsMap) {
-            remainingMin[ch] = con.minCount;
-            AppLogger::Log(fmt::format("[init] '{}' minCount={}", ch, con.minCount), LogLevel::Trace);
+            remainingMin[ch] = con.minCount();
+            AppLogger::Log(fmt::format("[init] '{}' minCount={}", ch, con.minCount()), LogLevel::Trace);
         }
     }
 
@@ -241,7 +303,7 @@ void CandidateGenerator::generateLeftTokens(
     std::vector<char> requiredAtPos(lhsLen, 0);
     if (lhsConstraintsMap) {
         for (const auto& [ch, con] : *lhsConstraintsMap) {
-            for (int gp : con.greenPos) {
+            for (int gp : con.greenPos()) {
                 if (gp >= 0 && gp < lhsLen) {
                     if (requiredAtPos[gp] != 0 && requiredAtPos[gp] != ch) {
                         AppLogger::Log(fmt::format("[Constraint] conflict at pos {}: '{}' vs '{}'", gp, requiredAtPos[gp], ch), LogLevel::Warn);
@@ -280,10 +342,10 @@ void CandidateGenerator::generateLeftTokens(
             if (it != lhsConstraintsMap->end()) {
                 const Constraint& con = it->second;
                 int used = std::count(current.begin(), current.end(), ch);
-                if (con.maxCount == 0 || used >= con.maxCount)
+                if (con.maxCount() == 0 || used >= con.maxCount())
                     passedMax = false;
 
-                if (pos < (int)con.bannedPos.size() && con.bannedPos[pos])
+                if (pos < (int)con.bannedPos().size() && con.bannedPos()[pos])
                     passedBan = false;
             }
         }
@@ -467,14 +529,29 @@ std::vector<string> CandidateGenerator::generate(
 
     std::unordered_set<char> forbidden;
     for (auto& [ch, con] : constraintsMap) {
-        if (con.minCount == 0 && con.maxCount == 0) {
+        if (con.minCount() == 0 && con.maxCount() == 0) {
             forbidden.insert(ch);
             AppLogger::Debug(fmt::format("[Constraint] '{}' is forbidden (min=max=0)", ch));
         }
     }
 
+    // ===== 新增分析階段 =====
+    GuessConflictInfo conflict = analyzeGuessConflicts(expressions, colors);
+
+    if (conflict.hasGreenConflict)
+    {
+        AppLogger::Warn("Conflicting green positions detected.");
+        AppLogger::Warn("Those positions will not be locked.");
+    }
+
+    if (!conflict.eqPosConsistent)
+    {
+        AppLogger::Warn("'=' green position inconsistent among guesses.");
+        AppLogger::Warn("Equation position will be auto-detected.");
+    }
+
     //尋找green '='
-    int fixedEqPos = -1;
+    int fixedEqPos = conflict.fixedEqPos;
     for (size_t i = 0; i < expressions.size(); ++i) {
         const std::string& expr = expressions[i];
         const std::string& color = colors[i];
@@ -520,7 +597,7 @@ std::vector<string> CandidateGenerator::generate(
         // 調整 minCount，考慮 RHS 可用空間
         for (auto& [ch, con] : lhsConstraintsMap) {
             int rhsAvailable = rhsLen; // 假設每個符號最多可用 RHS 空間補足
-            con.minCount = (std::max)(0, con.minCount - rhsAvailable);
+            con.minCount() = (std::max)(0, con.minCount() - rhsAvailable);
             // maxCount 可保留原始值
         }
 
