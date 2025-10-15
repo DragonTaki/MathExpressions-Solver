@@ -153,7 +153,7 @@ int main() {
         AppLogger::Shutdown();
     });
     AppLogger::EnableTestMode(true);
-    AppLogger::SetLogLevel(LogLevel::Debug);
+    AppLogger::SetLogLevel(LogLevel::Trace);
     AppLogger::Log(std::format("__cplusplus = {}", __cplusplus), LogLevel::Debug);
     
     while (true) {

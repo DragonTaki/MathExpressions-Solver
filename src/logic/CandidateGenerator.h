@@ -15,6 +15,15 @@
 #include "Constraint.h"
 #include "ExpressionValidator.h"
 
+namespace Expr {
+    enum class TokenType { Digit, Operator };
+
+    struct Token {
+        TokenType type;
+        std::string value; // 對於數字可能多位
+    };
+}
+
 class CandidateGenerator {
 public:
     CandidateGenerator(ExpressionValidator& validator);
@@ -23,31 +32,30 @@ public:
         int length,
         const std::unordered_set<char>& operators,
         const std::vector<std::string>& expressions,
-        const std::vector<std::string>& colors
-    );
+        const std::vector<std::string>& colors);
 
 private:
     ExpressionValidator& validator;
 
-    bool matchesFeedback(
-        const std::string& candidate,
-        const std::string& expression,
-        const std::string& color
-    );
-
     bool isRhsLengthFeasible(
         int lhsLen,
         int rhsLen,
-        const std::unordered_set<char>& operators
-    ) const;
+        const std::unordered_set<char>& operators) const;
+
+    void _dfsGenerateLeftTokens(
+        int lhsLen,
+        const std::unordered_set<char>& operators,
+        std::vector<Expr::Token>& current,
+        std::vector<std::vector<Expr::Token>>& lhsCandidates,
+        std::unordered_map<char, Constraint>* lhsConstraintsMap,
+        const std::vector<char>& requiredAtPos,
+        int depth);
 
     void generateLeftTokens(
         int lhsLen,
         const std::unordered_set<char>& operators,
-        std::string& current,
-        std::vector<std::string>& lhsCandidates,
-        const std::vector<std::unordered_set<char>>* allowed,
-        const std::unordered_map<char, Constraint>* lhsConstraintsMap,
-        int depth
-    );
+        std::vector<Expr::Token> current,
+        std::vector<std::vector<Expr::Token>>& lhsCandidates,
+        std::unordered_map<char, Constraint>* lhsConstraintsMap,
+        int depth);
 };

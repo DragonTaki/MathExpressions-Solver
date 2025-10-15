@@ -3,8 +3,8 @@
 // Do not distribute or modify
 // Author: DragonTaki (https://github.com/DragonTaki)
 // Create Date: 2025/10/05
-// Update Date: 2025/10/05
-// Version: v1.0
+// Update Date: 2025/10/15
+// Version: v2.0
 /* ----- ----- ----- ----- */
 
 #include <algorithm>
@@ -150,11 +150,11 @@ inline void updateConstraint(
 {
     // Record positional constraints according to color feedback
     if (color == 'g') {
-        bc.greenPos.push_back(pos);  // Green: must appear here at this exact position
+        bc.greenPos.insert(pos);  // Green: must appear here at this exact position
     } else if (color == 'y') {
-        bc.bannedPos[pos] = true;    // Yellow: cannot appear here, but exists elsewhere
+        bc.bannedPos.insert(pos);    // Yellow: cannot appear here, but exists elsewhere
     } else if (color == 'r') {
-        bc.bannedPos[pos] = true;    // Red: cannot appear here (or not at all)
+        bc.bannedPos.insert(pos);    // Red: cannot appear here (or not at all)
     }
 }
 
@@ -201,8 +201,10 @@ void processSingleGuess(
 
         // Apply position-specific constraint update
         if (std::isdigit(charactor)) {
+            //AppLogger::Debug(std::format("Handling digit: {}", charactor));
             updateConstraint(constraintsMap[charactor].digit, charactorColor, (int)pos);
-        } else if (std::string("+-*/^").find(charactor) != std::string::npos) {
+        } else if (std::string("+-*/^=").find(charactor) != std::string::npos) {
+            //AppLogger::Debug(std::format("Handling symbol: {}", charactor));
             updateConstraint(constraintsMap[charactor].symbol, charactorColor, (int)pos);
 
             // Flag green operator location for structure conflict check
@@ -249,14 +251,14 @@ void processSingleGuess(
                 globalConflict = true;
             }
             AppLogger::Warn(std::format(
-                "Constraint conflict: symbol '{}' had bounded min/max ({}..{}); new guess tried to change to ({}..{})",
+                "Conflict: Symbol '{}' had bounded min/max ({}..{}); new guess tried to change to ({}..{})",
                 symbol, oldMin, oldMax, newMinCandidate, newMaxCandidate));
         }
 
         // Write back
         if (!constraint.hasConflict()) {  // Directly write back if no conflict
-            constraint.minCount() = newMinCandidate;
-            constraint.maxCount() = newMaxCandidate;
+            constraint.minCount() = (std::max)(constraint.minCount(), newMinCandidate);
+            constraint.maxCount() = (std::min)(constraint.maxCount(), newMaxCandidate);
         } else {  // Loosen the bound if conflict happened
             constraint.minCount() = (std::min)(newMinCandidate, oldMin);
             constraint.maxCount() = (std::max)(newMaxCandidate, oldMax);
@@ -295,10 +297,14 @@ std::unordered_map<char, Constraint> deriveConstraints(
     std::vector<bool> greenSymbolFlags(length, false);     ///< Marks green operators for structure validation
 
     // Initialize all digits and operators with default Constraint
-    for (char c = '0'; c <= '9'; ++c)
+    for (char c = '0'; c <= '9'; ++c) {
         constraintsMap[c].digit = DigitConstraint(length);
-    for (char c : std::string("+-*/^="))
+        constraintsMap[c].type = ConstraintType::Digit;
+    }
+    for (char c : std::string("+-*/^=")) {
         constraintsMap[c].symbol = SymbolConstraint(length);
+        constraintsMap[c].type = ConstraintType::Symbol;
+    }
 
     // Process each guess-feedback pair
     for (size_t i = 0; i < expressions.size(); ++i) {
@@ -308,10 +314,10 @@ std::unordered_map<char, Constraint> deriveConstraints(
         
         // Length check, if no match than ignore this pair
         if (expression.size() != length) {
-            AppLogger::Error(std::format("Expression length mismatch at index {}, should be length {}", i, length));
+            AppLogger::Error(std::format("Length error: Expression length mismatch at index {}, should be length {}", i, length));
             continue;
         } else if (color.size() != length) {
-            AppLogger::Error(std::format("Color length mismatch at index {}, should be length {}", i, length));
+            AppLogger::Error(std::format("Length error: Color length mismatch at index {}, should be length {}", i, length));
             continue;
         }
 
@@ -323,7 +329,7 @@ std::unordered_map<char, Constraint> deriveConstraints(
     for (size_t pos = 1; pos < greenSymbolFlags.size(); ++pos) {
         if (greenSymbolFlags[pos] && greenSymbolFlags[pos - 1]) {
             AppLogger::Warn(std::format(
-                "Cross-guess adjacent green symbol conflict between pos {} and {}",
+                "Conflict: Cross-guess adjacent green symbol conflict between pos {} and {}",
                 pos - 1, pos));
             globalConflict = true;
 
@@ -338,10 +344,16 @@ std::unordered_map<char, Constraint> deriveConstraints(
 
     // '=' must appear exactly once
     if (constraintsMap.contains('=')) {
-        constraintsMap['='].symbol.minCount = 1;
-        constraintsMap['='].symbol.maxCount = 1;
+        if (constraintsMap['='].greenPos().size() > 1) {  // If detected more than one green position
+            constraintsMap['='].greenPos().clear();
+            AppLogger::Warn(std::format("Conflict: '=' has {} green locations", constraintsMap['='].symbol.greenPos.size()));
+            constraintsMap['='].hasConflict() = true;
+            globalConflict = true;
+        }
+        constraintsMap['='].minCount() = 1;
+        constraintsMap['='].maxCount() = 1;
     } else {
-        throw std::runtime_error("'=' not show in constraints map.");
+        throw std::runtime_error("Data error: '=' not show in constraints map.");
     }
 
     if (globalConflict) {

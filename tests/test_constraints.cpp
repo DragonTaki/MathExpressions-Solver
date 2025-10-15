@@ -119,8 +119,12 @@ int main() {
             std::cout << "  Symbol: " << symbol
                     << " | MinCount: " << cst.minCount()
                     << " | MaxCount: " << cst.maxCount()
-                    << " | GreenPos: " << cst.greenPos().size()
-                    << " | BannedPos: " << std::count(cst.bannedPos().begin(), cst.bannedPos().end(), true)
+                    << " | GreenPos: {";
+            for (int pos : cst.greenPos()) std::cout << pos << " ";
+            std::cout << "}"
+                    << " | BannedPos: {";
+            for (int pos : cst.bannedPos()) std::cout << pos << " ";
+            std::cout << "}"
                     << " | Conflict: " << (cst.hasConflict() ? "YES" : "NO")
                     << std::endl;
         }
@@ -152,7 +156,7 @@ int main() {
                         << " | MinCount: " << cst.minCount()
                         << " | MaxCount: " << cst.maxCount()
                         << " | GreenPos: " << cst.greenPos().size()
-                        << " | BannedPos: " << std::count(cst.bannedPos().begin(), cst.bannedPos().end(), true)
+                        << " | BannedPos: " << cst.bannedPos().size()
                         << " | Conflict: " << (cst.hasConflict() ? "YES" : "NO")
                         << std::endl;
             }
@@ -178,7 +182,7 @@ int main() {
                         << " | MinCount: " << cst.minCount()
                         << " | MaxCount: " << cst.maxCount()
                         << " | GreenPos: " << cst.greenPos().size()
-                        << " | BannedPos: " << std::count(cst.bannedPos().begin(), cst.bannedPos().end(), true)
+                        << " | BannedPos: " << cst.bannedPos().size()
                         << " | Conflict: " << (cst.hasConflict() ? "YES" : "NO")
                         << std::endl;
             }
@@ -204,7 +208,7 @@ int main() {
                         << " | MinCount: " << cst.minCount()
                         << " | MaxCount: " << cst.maxCount()
                         << " | GreenPos: " << cst.greenPos().size()
-                        << " | BannedPos: " << std::count(cst.bannedPos().begin(), cst.bannedPos().end(), true)
+                        << " | BannedPos: " << cst.bannedPos().size()
                         << " | Conflict: " << (cst.hasConflict() ? "YES" : "NO")
                         << std::endl;
             }

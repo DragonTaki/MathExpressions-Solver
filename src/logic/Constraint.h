@@ -3,8 +3,8 @@
 // Do not distribute or modify
 // Author: DragonTaki (https://github.com/DragonTaki)
 // Create Date: 2025/10/05
-// Update Date: 2025/10/05
-// Version: v1.0
+// Update Date: 2025/10/15
+// Version: v2.0
 /* ----- ----- ----- ----- */
 
 #pragma once
@@ -12,6 +12,17 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+/**
+ * @enum ConstraintType
+ * @brief Specifies the type of constraint: either a digit or a symbol.
+ *
+ * <summary>
+ * Used in the `Constraint` struct to determine which underlying
+ * BaseConstraint (digit or symbol) is currently active.
+ * </summary>
+ */
+enum class ConstraintType { Digit, Symbol };
 
 /**
  * @struct BaseConstraint
@@ -31,14 +42,15 @@
  * </summary>
  */
 struct BaseConstraint {
-    int minCount = 0;                  ///< Minimum required occurrences of this character
-    int maxCount = 9999;               ///< Maximum allowed occurrences of this character
-    std::vector<int> greenPos;         ///< Positions confirmed to contain this character
-    std::vector<bool> bannedPos;       ///< Positions where this character is forbidden
-    bool hasConflict = false;          ///< True if a conflict exists for this character
+    int minCount = 0;                   ///< Minimum required occurrences of this character
+    int maxCount = 9999;                ///< Maximum allowed occurrences of this character
+    std::unordered_set<int> greenPos;   ///< Positions confirmed to contain this character
+    std::unordered_set<int> bannedPos;  ///< Positions where this character is forbidden
+    bool hasConflict = false;           ///< True if a conflict exists for this character
 
-    BaseConstraint() = default;
-    explicit BaseConstraint(int len) : bannedPos(len, false) {}  ///< Initializes bannedPos vector
+    int usedCount = 0;                  ///< Count used times for generating lhs
+
+    BaseConstraint(int len = 0) {}
 };
 
 /**
@@ -95,120 +107,108 @@ struct SymbolConstraint : BaseConstraint {
 
 /**
  * @struct Constraint
- * @brief Aggregates all constraint types for a single character in a candidate expression.
+ * @brief Aggregates digit and symbol constraints for a single character.
  *
  * <summary>
  * Each character may either be a digit or a symbol.
- * This struct unifies digit and symbol constraints, providing a pointer `base` to easily access
- * common fields regardless of character type. Also provides a unified getter/setter interface.
+ * Provides unified access to BaseConstraint fields via the `type` member.
+ * Offers convenient getters/setters for min/max counts, positional constraints,
+ * and conflict flags. Symbol structural rules are accessible via `structure()`.
  *
  * Members:
- * - `base`: Pointer to either `digit` or `symbol` BaseConstraint.
- * - `digit`: Digit-specific constraints.
- * - `symbol`: Symbol-specific constraints.
+ * - `type`  : Indicates whether this is a digit or symbol constraint.
+ * - `digit` : Digit-specific constraint fields.
+ * - `symbol`: Symbol-specific constraint fields.
  *
  * Methods:
- * - Constructor `Constraint(int len, bool isDigit)` initializes digit/symbol constraints and sets `base`.
- * - `minCount()`, `maxCount()`, `greenPos()`, `bannedPos()`, `hasConflict()` provide unified access to BaseConstraint fields.
- * - `structure()` provides access to SymbolConstraint structural rules.
+ * - Unified getters/setters for `minCount`, `maxCount`, `greenPos`, `bannedPos`, `hasConflict`.
+ * - `structure()` getter for symbol structural rules.
  * </summary>
  */
 struct Constraint {
-    BaseConstraint* base;              ///< Pointer to digit or symbol BaseConstraint
+    ConstraintType type;               ///< Indicates whether the character is a digit or symbol
     DigitConstraint digit;             ///< Digit-specific constraints
     SymbolConstraint symbol;           ///< Operator-specific constraints
-
-    Constraint() : digit(0), symbol(0), base(&digit) {}  // default: treat as digit
-
-    /**
-     * @brief Constructs a Constraint and selects type.
-     * @param len Length of the expression (used to initialize bannedPos vectors)
-     * @param isDigit True if this constraint represents a digit, false for symbol
-     */
-    Constraint(int len, bool isDigit)
-        : digit(len), symbol(len) {
-        base = isDigit ? static_cast<BaseConstraint*>(&digit)
-                       : static_cast<BaseConstraint*>(&symbol);
-    }
 
     /**
      * @brief Get or modify the minimum required occurrences of this character.
      *
      * <summary>
-     * Returns a reference to the `minCount` field in the underlying BaseConstraint.
-     * This represents the minimum number of times the character must appear in a candidate expression.
-     * Using a reference allows both reading and updating the value.
-     *
-     * Usage:
-     * @code
-     * Constraint c(len, true); // digit
-     * c.minCount() = 2;        // Set minimum occurrences to 2
-     * int minVal = c.minCount(); // Read current value
-     * @endcode
+     * Provides access to `minCount` in the appropriate underlying BaseConstraint.
+     * Using a reference allows reading or updating directly.
      * </summary>
      * @return Reference to minCount
      */
-    int& minCount() { return base->minCount; }
-    const int& minCount() const { return base->minCount; }
-
+    int& minCount() { return type == ConstraintType::Digit ? digit.minCount : symbol.minCount; }
+    const int& minCount() const { return type == ConstraintType::Digit ? digit.minCount : symbol.minCount; }
+    
     /**
      * @brief Get or modify the maximum allowed occurrences of this character.
      *
      * <summary>
-     * Returns a reference to the `maxCount` field in the underlying BaseConstraint.
-     * This represents the maximum number of times the character can appear in a candidate expression.
-     * A reference is returned for both reading and writing.
+     * Provides access to `maxCount` in the underlying BaseConstraint.
      * </summary>
      * @return Reference to maxCount
      */
-    int& maxCount() { return base->maxCount; }
-    const int& maxCount() const { return base->maxCount; }
+    int& maxCount() { return type == ConstraintType::Digit ? digit.maxCount : symbol.maxCount; }
+    const int& maxCount() const { return type == ConstraintType::Digit ? digit.maxCount : symbol.maxCount; }
 
     /**
-     * @brief Access the vector of confirmed positions (green positions) for this character.
+     * @brief Access confirmed positions (green feedback) for this character.
      *
      * <summary>
-     * Returns a reference to `greenPos` in BaseConstraint.
-     * Each integer in the vector represents an index in the candidate expression where this character
-     * must appear (green feedback from previous guesses).
-     * Modifying this vector allows adding or removing positional constraints dynamically.
+     * Returns reference to `greenPos` in the appropriate BaseConstraint.
+     * Each position represents an index in the candidate expression where
+     * the character must appear.
      * </summary>
-     * @return Reference to vector of green positions
+     * @return Reference to greenPos set
      */
-    std::vector<int>& greenPos() { return base->greenPos; }
-    const std::vector<int>& greenPos() const { return base->greenPos; }
+    std::unordered_set<int>& greenPos() { return type == ConstraintType::Digit ? digit.greenPos : symbol.greenPos; }
+    const std::unordered_set<int>& greenPos() const { return type == ConstraintType::Digit ? digit.greenPos : symbol.greenPos; }
 
     /**
-     * @brief Access the vector of banned positions for this character.
+     * @brief Access positions where this character is banned.
      *
      * <summary>
-     * Returns a reference to `bannedPos` in BaseConstraint.
-     * Each element corresponds to a position in the candidate expression.
-     * - true: this character cannot appear at this position (yellow/red feedback)
-     * - false: no restriction at this position
-     * Modifying this vector updates positional bans for candidate filtering.
+     * Returns reference to `bannedPos` in BaseConstraint.
+     * Used for yellow/red feedback indicating positions the character cannot occupy.
      * </summary>
-     * @return Reference to vector of banned positions
+     * @return Reference to bannedPos set
      */
-    std::vector<bool>& bannedPos() { return base->bannedPos; }
-    const std::vector<bool>& bannedPos() const { return base->bannedPos; }
+    std::unordered_set<int>& bannedPos() { return type == ConstraintType::Digit ? digit.bannedPos : symbol.bannedPos; }
+    const std::unordered_set<int>& bannedPos() const { return type == ConstraintType::Digit ? digit.bannedPos : symbol.bannedPos; }
 
     /**
      * @brief Access or modify the conflict flag for this character.
      *
      * <summary>
-     * Returns a reference to `hasConflict` in BaseConstraint.
-     * This flag indicates whether conflicting feedback or an invalid state has been detected
-     * for this character. For example, a character cannot simultaneously satisfy all previous feedback.
-     * Modifying this flag can be used during constraint validation or candidate filtering.
+     * Indicates whether feedback or structural rules have resulted in a conflict.
+     * Setting this to true can mark a character as invalid in candidate filtering.
      * </summary>
      * @return Reference to hasConflict
      */
-    bool& hasConflict() { return base->hasConflict; }
-    const bool& hasConflict() const { return base->hasConflict; }
+    bool& hasConflict() { return type == ConstraintType::Digit ? digit.hasConflict : symbol.hasConflict; }
+    const bool& hasConflict() const { return type == ConstraintType::Digit ? digit.hasConflict : symbol.hasConflict; }
+
+    /**
+     * @brief Get or modify the used count of this character. For lhs generation.
+     *
+     * <summary>
+     * Provides access to `usedCount` in the appropriate underlying BaseConstraint.
+     * Using a reference allows reading or updating directly.
+     * </summary>
+     * @return Reference to usedCount
+     */
+    int& usedCount() { return type == ConstraintType::Digit ? digit.usedCount : symbol.usedCount; }
+    const int& usedCount() const { return type == ConstraintType::Digit ? digit.usedCount : symbol.usedCount; }
 
     /**
      * @brief Access structural constraints (only relevant for symbols).
+     *
+     * <summary>
+     * Returns reference to `structure` in SymbolConstraint.
+     * Used to inspect or update adjacency and formatting conflicts.
+     * </summary>
      * @return Reference to StructuralConstraint
      */
     StructuralConstraint& structure() { return symbol.structure; }

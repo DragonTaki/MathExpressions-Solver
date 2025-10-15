@@ -23,48 +23,13 @@
 
 using namespace std;
 
-struct GuessConflictInfo
-{
-    std::vector<std::unordered_set<char>> greenCandidates;
-    bool eqPosConsistent = true;
-    int fixedEqPos = -1;
-    bool hasGreenConflict = false;
-};
-
 CandidateGenerator::CandidateGenerator(ExpressionValidator& validator)
     : validator(validator) {}
 
-bool CandidateGenerator::matchesFeedback(const string& candidate,
-                                         const string& expression,
-                                         const string& color) {
-    unordered_map<char,int> cCount;
-    for (char ch : candidate) cCount[ch]++;
-
-    // 綠色
-    for (size_t i = 0; i < candidate.size(); ++i) {
-        if (color[i] == 'g') {
-            if (candidate[i] != expression[i]) return false;
-            cCount[expression[i]]--;
-        }
-    }
-
-    // 黃色
-    for (size_t i = 0; i < candidate.size(); ++i) {
-        if (color[i] == 'y') {
-            if (candidate[i] == expression[i]) return false;
-            if (cCount[expression[i]] <= 0) return false;
-            cCount[expression[i]]--;
-        }
-    }
-
-    // 紅色
-    for (size_t i = 0; i < candidate.size(); ++i) {
-        if (color[i] == 'r') {
-            if (cCount.count(expression[i]) && cCount[expression[i]] > 0) return false;
-        }
-    }
-
-    return true;
+std::string tokenVecToString(const std::vector<Expr::Token>& tokens) {
+    std::string s;
+    for (auto& t : tokens) s += t.value;
+    return s;
 }
 
 bool CandidateGenerator::isRhsLengthFeasible(int lhsLen, int rhsLen, const std::unordered_set<char>& operators) const {
@@ -182,131 +147,146 @@ bool CandidateGenerator::isRhsLengthFeasible(int lhsLen, int rhsLen, const std::
     return maxDigits >= rhsLen;
 }
 
-/* ----- 新增輔助函數：分析所有 guess 衝突 ----- */
-static GuessConflictInfo analyzeGuessConflicts(const std::vector<std::string>& guesses,
-                                               const std::vector<std::string>& feedbacks)
+void CandidateGenerator::_dfsGenerateLeftTokens(
+    int lhsLen,
+    const std::unordered_set<char>& operators,
+    std::vector<Expr::Token>& current,
+    std::vector<std::vector<Expr::Token>>& lhsCandidates,
+    std::unordered_map<char, Constraint>* lhsConstraintsMap,
+    const std::vector<char>& requiredAtPos,
+    int depth)
 {
-    GuessConflictInfo info;
-
-    if (guesses.empty())
-        return info;
-
-    size_t maxLen = guesses[0].size();
-    info.greenCandidates.resize(maxLen);
-
-    std::unordered_set<int> eqPositions; // '=' green positions
-
-    for (size_t i = 0; i < guesses.size(); ++i)
+    // Log for each depth
     {
-        const std::string& g = guesses[i];
-        const std::string& fb = feedbacks[i];
+        std::string ops;
+        for (char o : operators) ops.push_back(o), ops.push_back(' ');
+        AppLogger::Debug(fmt::format("[generateLeftTokens, depth={}] lhsLen={}, operators=[{}]", depth, lhsLen, ops));
+    }
 
-        for (size_t j = 0; j < g.size(); ++j)
-        {
-            if (fb[j] == 'g')
-            {
-                info.greenCandidates[j].insert(g[j]);
-                if (g[j] == '=')
-                    eqPositions.insert(static_cast<int>(j));
+    // 計算目前 token 已佔長度
+    int pos = 0;
+    for (const auto& t : current)
+        pos += static_cast<int>(t.value.size());
+
+    if (pos >= lhsLen) {
+        lhsCandidates.push_back(current);
+        return;
+    }
+
+    // Initialize remainingMin (=minCount), for charactor remaining available prune
+    std::unordered_map<char,int> remainingMin;
+    if (lhsConstraintsMap) {
+        for (const auto& [ch, con] : *lhsConstraintsMap) {
+            remainingMin[ch] = con.minCount();
+            //AppLogger::Trace(fmt::format("[init] '{}' minCount={}", ch, con.minCount()));
+        }
+    }
+
+    // --- Step 2: 檢查某個 token 是否可放在位置 pos ---
+    auto isTokenAllowedAt = [&](const Expr::Token& token, int pos) -> bool {
+        char ch = token.value[0]; // 第一個字符判斷，因為數字可能多位
+        bool allowed = true;
+
+        if (pos < (int)requiredAtPos.size() && requiredAtPos[pos] != 0) {
+            if (requiredAtPos[pos] != ch) return false;
+        }
+
+        if (lhsConstraintsMap) {
+            auto it = lhsConstraintsMap->find(ch);
+            if (it != lhsConstraintsMap->end()) {
+                const Constraint& con = it->second;
+                int used = 0;
+                for (const auto& t : current) {
+                    if (t.value == token.value) used++;
+                }
+
+                if (con.maxCount() != 0 && used >= con.maxCount()) allowed = false;
+                if (con.bannedPos().count(pos) > 0) allowed = false;
             }
         }
-    }
 
-    // 檢查 green 衝突
-    for (const auto& set : info.greenCandidates)
-    {
-        if (set.size() > 1)
-        {
-            info.hasGreenConflict = true;
-            break;
+        return allowed;
+    };
+
+    // 嘗試每個可能字符
+    for (char ch = '0'; ch <= '9'; ++ch) {
+        auto it = lhsConstraintsMap ? lhsConstraintsMap->find(ch) : lhsConstraintsMap->end();
+
+        if (it != lhsConstraintsMap->end()) {
+            const Constraint& con = it->second;
+
+            // forbidden
+            if (con.minCount() == 0 && con.maxCount() == 0) {
+                AppLogger::Trace(fmt::format("[Constraint] Skipped digit {}: forbidden (min=max=0)", ch));
+                continue;
+            }
+
+            // banned positions
+            if (con.bannedPos().count(pos)) {
+                AppLogger::Trace(fmt::format("[Constraint] Skipped digit {}: banned positions", ch));
+                continue;
+            }
+
+            // optional: 檢查 maxCount 是否已達限制
+            if (con.usedCount() >= con.maxCount()) {
+                AppLogger::Trace(fmt::format("[Constraint] Skipped digit {}: Usage reach max limit {}", ch, con.maxCount()));
+                continue;
+            } // 已達上限
         }
+
+        AppLogger::Trace(fmt::format("[Constraint] Trying digit {}", ch));
+        Expr::Token token{Expr::TokenType::Digit, std::string(1, ch)};
+        current.push_back(token);
+
+        // 更新使用次數
+        if (it != lhsConstraintsMap->end()) it->second.usedCount()++;
+
+        _dfsGenerateLeftTokens(lhsLen, operators, current, lhsCandidates,
+                               lhsConstraintsMap, requiredAtPos, depth + 1);
+
+        // 回溯
+        current.pop_back();
+        if (it != lhsConstraintsMap->end()) it->second.usedCount()--;
     }
 
-    // 檢查 '=' 位置一致性
-    if (eqPositions.size() == 1)
-    {
-        info.fixedEqPos = *eqPositions.begin();
-    }
-    else if (eqPositions.size() > 1)
-    {
-        info.eqPosConsistent = false;
-    }
+    for (char op : operators) {
+        Expr::Token token{Expr::TokenType::Operator, std::string(1, op)};
+        if (!isTokenAllowedAt(token, pos)) continue;
 
-    return info;
+        // 運算子檢查
+        if (!current.empty()) {
+            Expr::Token last = current.back();
+            if (last.type == Expr::TokenType::Operator) continue; // 不允許連續運算子
+            if (last.value == "^" && token.value == "^") continue; // 不允許連續 ^
+        } else {
+            if (op != '+' && op != '-') continue; // 開頭只允許 +/-
+        }
+
+        AppLogger::Trace(fmt::format("[Constraint] Trying operator {}", op));
+        current.push_back(token);
+        _dfsGenerateLeftTokens(lhsLen, operators, current, lhsCandidates,
+                               lhsConstraintsMap, requiredAtPos, depth + 1);
+        current.pop_back();
+    }
 }
 
 void CandidateGenerator::generateLeftTokens(
     int lhsLen,
     const std::unordered_set<char>& operators,
-    std::string& current,
-    std::vector<std::string>& lhsCandidates,
-    const std::vector<std::unordered_set<char>>* allowed,
-    const std::unordered_map<char, Constraint>* lhsConstraintsMap,
-    int depth
-) {
-    // --- Log entry ---
-    {
-        std::string ops;
-        for (char o : operators) ops.push_back(o), ops.push_back(' ');
-        AppLogger::Debug(fmt::format("[generateLeftTokens] lhsLen={}, operators=[{}], depth={}", lhsLen, ops, depth));
-        if (allowed)
-            AppLogger::Debug(fmt::format("[generateLeftTokens] allowed vector size = {}", (int)allowed->size()));
-        if (lhsConstraintsMap)
-            AppLogger::Debug(fmt::format("[generateLeftTokens] constraintsMap size = {}", (int)lhsConstraintsMap->size()));
-    }
-
-    // ----------------------------
-    // Step 1: 初始化 minCount
-    // ----------------------------
-    std::unordered_map<char,int> remainingMin;
-    if (lhsConstraintsMap) {
-        for (const auto& [ch, con] : *lhsConstraintsMap) {
-            remainingMin[ch] = con.minCount();
-            AppLogger::Log(fmt::format("[init] '{}' minCount={}", ch, con.minCount()), LogLevel::Trace);
-        }
-    }
-
-    // ----------------------------
-    // Step 3: 檢查運算子合法性 (語義剪枝)
-    // ----------------------------
-    auto checkOperatorValidity = [&](const std::string& expr, char nextOp) -> bool {
-        if (expr.empty()) return (nextOp == '+' || nextOp == '-'); // 開頭只能 + 或 -
-        char last = expr.back();
-
-        // 不允許開頭為 *, /, ^
-        if (expr.size() == 1 && (nextOp == '*' || nextOp == '/' || nextOp == '^'))
-            return false;
-
-        // 不允許連續運算子
-        if (operators.count(last)) return false;
-
-        // 不允許連續 ^（例如 2^2^2）
-        if (last == '^' && nextOp == '^') return false;
-
-        // 嘗試評估當前表達式結果
-        auto valOpt = ExpressionValidator::safeEval(expr);
-        if (!valOpt.has_value()) return false;
-        double val = valOpt.value();
-
-        // 除法時檢查可除性（簡易剪枝）
-        if (nextOp == '/') {
-            if (std::fabs(val) < 1e-9) return false; // 前面結果為0
-        }
-
-        // 運算結果不能為負
-        if (val < 0) return false;
-        
-        return true;
-    };
-
-    // --- 新增：建立 requiredAtPos (將每個 greenPos 映射到對應的字元) ---
+    std::vector<Expr::Token> current,
+    std::vector<std::vector<Expr::Token>>& lhsCandidates,
+    std::unordered_map<char, Constraint>* lhsConstraintsMap,
+    int depth)
+{
+    // --- Step 0: 建立 requiredAtPos (僅建立一次) ---
     std::vector<char> requiredAtPos(lhsLen, 0);
     if (lhsConstraintsMap) {
         for (const auto& [ch, con] : *lhsConstraintsMap) {
             for (int gp : con.greenPos()) {
                 if (gp >= 0 && gp < lhsLen) {
                     if (requiredAtPos[gp] != 0 && requiredAtPos[gp] != ch) {
-                        AppLogger::Log(fmt::format("[Constraint] conflict at pos {}: '{}' vs '{}'", gp, requiredAtPos[gp], ch), LogLevel::Warn);
+                        AppLogger::Warn(fmt::format("[Constraint] conflict at pos {}: '{}' vs '{}'",
+                            gp, requiredAtPos[gp], ch));
                     }
                     requiredAtPos[gp] = ch;
                 }
@@ -314,192 +294,9 @@ void CandidateGenerator::generateLeftTokens(
         }
     }
 
-    // ----------------------------
-    // Step 2: isCharAllowedAt() with debug
-    // ----------------------------
-    auto isCharAllowedAt = [&](char ch, int pos) -> bool {
-        bool allowedPos = true;
-        bool passedMax = true;
-        bool passedBan = true;
-
-        if (pos >= 0 && pos < (int)requiredAtPos.size() && requiredAtPos[pos] != 0) {
-            // 若該位置已被某符號綠格鎖定，只有該符號被允許
-            if (requiredAtPos[pos] != ch) {
-                AppLogger::Log(fmt::format("[isCharAllowedAt] pos {} requires '{}' but checking '{}'", pos, requiredAtPos[pos], ch), LogLevel::Trace);
-                return false;
-            }
-        }
-
-        if (allowed && pos < (int)allowed->size()) {
-            const auto& allowedSet = (*allowed)[pos];
-            if (!allowedSet.empty() && allowedSet.count(ch) == 0) {
-                allowedPos = false;
-            }
-        }
-
-        if (lhsConstraintsMap) {
-            auto it = lhsConstraintsMap->find(ch);
-            if (it != lhsConstraintsMap->end()) {
-                const Constraint& con = it->second;
-                int used = std::count(current.begin(), current.end(), ch);
-                if (con.maxCount() == 0 || used >= con.maxCount())
-                    passedMax = false;
-
-                if (pos < (int)con.bannedPos().size() && con.bannedPos()[pos])
-                    passedBan = false;
-            }
-        }
-
-        bool ok = allowedPos && passedMax && passedBan;
-        if (!ok) {
-            AppLogger::Log(fmt::format("[isCharAllowedAt] ch='{}' pos={} => allowedPos={} max={} ban={}",
-                ch, pos, allowedPos, passedMax, passedBan), LogLevel::Trace);
-        }
-        return ok;
-    };
-
-    // ----------------------------
-    // Step 3: DFS 生成
-    // ----------------------------
-    std::function<void(int,bool,bool)> genTokens;
-    genTokens = [&](int pos, bool expectNumber, bool hasOperator) {
-        int remaining = lhsLen - pos;
-        if (remaining <= 0) {
-            if (!expectNumber && hasOperator)  // ✅ 必須包含至少一個運算子
-                lhsCandidates.push_back(current);
-            return;
-        }
-
-        // 剪枝：剩餘長度不足以滿足 minCount
-        for (auto& [ch, minRem] : remainingMin) {
-            if (minRem > remaining) {
-                AppLogger::Log(fmt::format("[genTokens] prune@{} remain={} -> minRem['{}']={}", pos, remaining, ch, minRem), LogLevel::Trace);
-                return;
-            }
-        }
-
-        // --- DEBUG: show current state ---
-        AppLogger::Log(fmt::format("[genTokens] pos={}, remaining={}, current='{}'", pos, remaining, current), LogLevel::Trace);
-
-        // base case
-        if (remaining == 0) {
-            AppLogger::Log(fmt::format("[genTokens] reached end => push '{}'", current), LogLevel::Trace);
-            lhsCandidates.push_back(current);
-            return;
-        }
-
-        // 嘗試產生數字區塊
-        for (int numLen = 1; numLen <= remaining; ++numLen) {
-            int after = remaining - numLen;
-            if (after == 1) continue;
-
-            AppLogger::Log(fmt::format("[genTokens] try number length={} at pos={}", numLen, pos), LogLevel::Trace);
-
-            std::function<void(int)> buildNumber;
-            buildNumber = [&](int idx) {
-                if (idx == numLen) {
-                    if (after == 0) {
-                        if (hasOperator) lhsCandidates.push_back(current);
-                        AppLogger::Log(fmt::format("[buildNumber] complete '{}' => candidate added", current), LogLevel::Trace);
-                        return;
-                    }
-                    for (char op : operators) {
-                        int opPos = pos + numLen;
-                        if (!isCharAllowedAt(op, opPos)) {
-                            AppLogger::Log(fmt::format("[buildNumber] skip op='{}' at pos={}", op, opPos), LogLevel::Trace);
-                            continue;
-                        }
-                        // === 新增語義剪枝 ===
-                        if (!checkOperatorValidity(current, op)) {
-                            AppLogger::Log(fmt::format("[prune] op='{}' invalid after '{}'", op, current), LogLevel::Trace);
-                            continue;
-                        }
-                        // operator 處理（在 idx==numLen 時的迴圈）
-                        if (requiredAtPos.size() > (size_t)opPos && requiredAtPos[opPos] != 0) {
-                            // 這個位置被綠格鎖定，必須符合該字元
-                            if (requiredAtPos[opPos] != op) {
-                                AppLogger::Log(fmt::format("[buildNumber] op '{}' not matching required '{}' at pos={}", op, requiredAtPos[opPos], opPos), LogLevel::Trace);
-                                continue;
-                            } else {
-                                // 必要的綠格符號，直接遞迴（等同於你原先的 isGreen 路徑）
-                                current.push_back(op);
-                                genTokens(opPos + 1, true, true);
-                                current.pop_back();
-                                continue; // 該位置僅允許這個 op
-                            }
-                        }
-                        // 否則按原流程嘗試該 op
-                        current.push_back(op);
-                        genTokens(opPos + 1, true, true);
-                        current.pop_back();
-                    }
-                    return;
-                }
-
-                int absolutePos = pos + idx;
-                std::vector<char> candidates;
-                for (char d = '0'; d <= '9'; ++d) {
-                    if (idx == 0 && numLen > 1 && d == '0') continue;
-                    if (!isCharAllowedAt(d, absolutePos)) continue;
-                    candidates.push_back(d);
-                }
-
-                // 如果該位置已被綠格鎖定，僅允許那字元
-                if (absolutePos >= 0 && absolutePos < (int)requiredAtPos.size() && requiredAtPos[absolutePos] != 0) {
-                    char required = requiredAtPos[absolutePos];
-                    if (std::find(candidates.begin(), candidates.end(), required) != candidates.end()) {
-                        candidates.clear();
-                        candidates.push_back(required);
-                        AppLogger::Log(fmt::format("[greenPriority] only allow '{}' at pos={}", required, absolutePos), LogLevel::Trace);
-                    } else {
-                        // required char 不在 candidates（通常因為 max/banned/allowed 排除了），就沒候選了
-                        candidates.clear();
-                    }
-                }
-
-                if (pos + numLen == lhsLen && !hasOperator) {
-                    // 到達結尾但尚未放過符號 → 無效
-                    AppLogger::Log(fmt::format("[prune] '{}' has no operator", current), LogLevel::Trace);
-                    return;
-                }
-
-                if (candidates.empty()) {
-                    AppLogger::Log(fmt::format("[buildNumber] no candidates at pos={} idx={} numLen={}", absolutePos, idx, numLen), LogLevel::Trace);
-                    return;
-                }
-
-                for (char ch : candidates) {
-                    AppLogger::Log(fmt::format("[buildNumber] choose '{}' at pos={}", ch, absolutePos), LogLevel::Trace);
-                    current.push_back(ch);
-                    if (remainingMin.count(ch) > 0 ) remainingMin[ch]--;
-
-                    // === 動態檢查 /0, 結果為負, 可除性 ===
-                    auto valOpt = ExpressionValidator::safeEval(current);
-                    if (valOpt.has_value()) {
-                        double val = valOpt.value();
-                        if (val < 0) { // 不允許負結果
-                            current.pop_back();
-                            if (remainingMin.count(ch)) remainingMin[ch]++;
-                            continue;
-                        }
-                    }
-
-                    buildNumber(idx + 1);  // ←← 關鍵：遞迴呼叫自己產生多位數
-                    if (remainingMin.count(ch) > 0) remainingMin[ch]++;
-                    current.pop_back();
-                }
-            };
-
-            buildNumber(0);
-        }
-    };
-
-    // ----------------------------
-    // Step 4: Start recursion
-    // ----------------------------
-    AppLogger::Debug("[generateLeftTokens] === START DFS ===");
-    genTokens(0, true, false);
-    AppLogger::Debug(fmt::format("[generateLeftTokens] Finished: generated {} lhsCandidates", lhsCandidates.size()));
+    // --- Step 1: 開始 DFS ---
+    _dfsGenerateLeftTokens(lhsLen, operators, current, lhsCandidates,
+                           lhsConstraintsMap, requiredAtPos, depth);
 }
 
 std::vector<string> CandidateGenerator::generate(
@@ -508,89 +305,91 @@ std::vector<string> CandidateGenerator::generate(
     const std::vector<string>& expressions,
     const std::vector<string>& colors
 ) {
-    std::vector<string> finalCandidates;
+    std::vector<string> finalCandidates;  ///< Record possible answer(s)
 
-    // 1) build allowedPerPos (greens) as you had
-    std::vector<std::unordered_set<char>> allowedPerPos(length);
-    bool useAllowed = false;
-    for (size_t i = 0; i < expressions.size(); ++i) {
-        const string& expression = expressions[i];
-        const string& color = colors[i];
-        for (int p = 0; p < length; ++p) {
-            if (color[p] == 'g') {
-                allowedPerPos[p].insert(expression[p]);
-                useAllowed = true;
-            }
+    // Build constraints
+    std::unordered_map<char, Constraint> constraintsMap = deriveConstraints(expressions, colors, length);
+
+    // Log for constraints
+    {
+        AppLogger::Debug("===== Derived Constraints =====");
+        for (auto& kv : constraintsMap) {
+            const auto& symbol = kv.first;
+            const auto& cst    = kv.second;
+
+            std::string greenStr;
+            for (int pos : cst.greenPos()) greenStr += std::to_string(pos) + " ";
+
+            std::string bannedStr;
+            for (int pos : cst.bannedPos()) bannedStr += std::to_string(pos) + " ";
+
+            AppLogger::Debug(fmt::format(
+                "  Symbol: {} | MinCount: {} | MaxCount: {} | GreenPos: {{{}}} | BannedPos: {{{}}} | Conflict: {}",
+                symbol,
+                cst.minCount(),
+                cst.maxCount(),
+                greenStr,
+                bannedStr,
+                cst.hasConflict() ? "YES" : "NO"
+            ));
         }
     }
 
-    // 2) build minRequired and forbidden (global)
-    std::unordered_map<char, Constraint> constraintsMap = deriveConstraints(expressions, colors, length);
-
+    // Build forbidden set (never shows up in the answer) from constraints, for more clearly meaning
     std::unordered_set<char> forbidden;
     for (auto& [ch, con] : constraintsMap) {
         if (con.minCount() == 0 && con.maxCount() == 0) {
             forbidden.insert(ch);
-            AppLogger::Debug(fmt::format("[Constraint] '{}' is forbidden (min=max=0)", ch));
+            AppLogger::Debug(fmt::format("[Constraint] Symbol '{}' is forbidden (min=max=0)", ch));
         }
     }
 
-    // ===== 新增分析階段 =====
-    GuessConflictInfo conflict = analyzeGuessConflicts(expressions, colors);
-
-    if (conflict.hasGreenConflict)
-    {
-        AppLogger::Warn("Conflicting green positions detected.");
-        AppLogger::Warn("Those positions will not be locked.");
+    // Try to search '=' fixed location
+    auto it = constraintsMap.find('=');
+    // Error handling
+    if (it == constraintsMap.end()) {
+        throw std::runtime_error("Data error: Missing '=' constraint.");
     }
 
-    if (!conflict.eqPosConsistent)
-    {
-        AppLogger::Warn("'=' green position inconsistent among guesses.");
-        AppLogger::Warn("Equation position will be auto-detected.");
+    const Constraint& eqConstraint = it->second;
+
+    if (eqConstraint.hasConflict()) {
+        // '=' conflict error should be handled in deriveConstraints() function
     }
 
-    //尋找green '='
-    int fixedEqPos = conflict.fixedEqPos;
-    for (size_t i = 0; i < expressions.size(); ++i) {
-        const std::string& expr = expressions[i];
-        const std::string& color = colors[i];
-        for (size_t j = 0; j < expr.size(); ++j) {
-            if (expr[j] == '=' && color[j] == 'g') {
-                fixedEqPos = static_cast<int>(j);
-                break;
-            }
+    std::vector<int> eqPositions;  ///< locations '=' might locate at
+
+    // Check if '=' has fixed location
+    if (!eqConstraint.greenPos().empty()) {  // Green position not empty => Has fixed location
+        for (int pos : eqConstraint.greenPos()) {
+            AppLogger::Debug(fmt::format("[eqPos] '=' has fixed green position at {}", pos));
+            eqPositions.push_back(pos);
         }
-        if (fixedEqPos != -1) break; // 找到第一個 green '=' 就可以了
-    }
-
-    std::vector<int> eqPositions;
-    if (fixedEqPos != -1) {
-        AppLogger::Debug(fmt::format("[eqPos] eqPos has fixed position at {}", fixedEqPos));
-        eqPositions.push_back(fixedEqPos); // 直接固定
-    } else {
+    } else {                                 // Empty => Try every possible location
         AppLogger::Debug(fmt::format("[eqPos] eqPos does not has fixed position, will traverse it"));
         for (int eqPos = length - 2; eqPos >= 3; --eqPos) {
             eqPositions.push_back(eqPos);
         }
     }
 
+    // Try to generate lhs, sort by '=' positions
     for (int eqPos : eqPositions) {
         int lhsLen = eqPos;
         int rhsLen = length - eqPos - 1;
 
-        // skip impossible rhs by length feasibility (call your isRhsLengthFeasible)
+        AppLogger::Debug("===== ===== ===== ===== ===== =====");
+        AppLogger::Debug(fmt::format("===== Processing left tokens for length {} =====", eqPos));
+        AppLogger::Debug("===== ===== ===== ===== ===== =====");
+
+        // Skip impossible rhs by length feasibility
         if (!isRhsLengthFeasible(lhsLen, rhsLen, operators)) {
             AppLogger::Debug(fmt::format("[Skip eqPos={}] unrealistic rhsLen {}", eqPos, rhsLen));
             continue;
         }
 
-        std::vector<string> lhsCandidates;
-        std::string temp;
+        std::vector<Expr::Token> tempLhsTokenVector;
+        std::vector<std::vector<Expr::Token>> lhsCandidates;
         vector<std::unordered_set<char>> lhsAllowed(lhsLen);
-        if (useAllowed) {
-            for (int i = 0; i < lhsLen; ++i) lhsAllowed[i] = allowedPerPos[i];
-        }
 
         std::unordered_map<char, Constraint> lhsConstraintsMap = constraintsMap;
 
@@ -601,51 +400,44 @@ std::vector<string> CandidateGenerator::generate(
             // maxCount 可保留原始值
         }
 
+        AppLogger::Debug("===== ===== ===== ===== ===== =====");
+        AppLogger::Debug("===== Start to generate left tokens =====");
+        AppLogger::Debug("===== ===== ===== ===== ===== =====");
         // call generator with forbidden and minReq and counts
-        generateLeftTokens(lhsLen, operators, temp, lhsCandidates,
-                           useAllowed ? &lhsAllowed : nullptr,
-                           &lhsConstraintsMap, 0);
+        generateLeftTokens(lhsLen, operators, tempLhsTokenVector, lhsCandidates, &lhsConstraintsMap, 0);
 
+        AppLogger::Debug("===== ===== ===== ===== ===== =====");
+        AppLogger::Debug("===== Start to eval left tokens =====");
+        AppLogger::Debug("===== ===== ===== ===== ===== =====");
         // rest as before: eval each lhs, skip negatives, check rhs length and feedback
         for (auto& lhs : lhsCandidates) {
-            AppLogger::Debug(fmt::format("[Try] LHS='{}' (eqPos={}, lhsLen={})", lhs, eqPos, lhsLen));
+            AppLogger::Debug(fmt::format("[Try] LHS='{}' (eqPos={}, lhsLen={})", tokenVecToString(lhs), eqPos, lhsLen));
 
             long long lhsResult;
             try {
-                lhsResult = validator.evalExpr(lhs);
+                lhsResult = validator.evalExpr(tokenVecToString(lhs));
             } catch (const std::exception& e) {
-                AppLogger::Debug(fmt::format("[Eval Fail] {} : {}", lhs, e.what()));
+                AppLogger::Debug(fmt::format("[Eval Fail] {} : {}", tokenVecToString(lhs), e.what()));
                 continue;
             } catch (...) {
-                AppLogger::Debug(fmt::format("[Eval Fail] {} : unknown error", lhs));
+                AppLogger::Debug(fmt::format("[Eval Fail] {} : unknown error", tokenVecToString(lhs)));
                 continue;
             }
 
             // 1) 立刻排除負數（遊戲規則：RHS 不會是負數）
             if (lhsResult < 0) {
-                AppLogger::Debug(fmt::format("[Reject Negative] {} => {}", lhs, lhsResult));
+                AppLogger::Debug(fmt::format("[Reject Negative] {} => {}", tokenVecToString(lhs), lhsResult));
                 continue;
             }
 
             std::string rhs = to_string(lhsResult);
             if ((int)rhs.size() != rhsLen) {
-                AppLogger::Debug(fmt::format("[Reject] {}={} -> rhs length {} != {}", lhs, rhs, (int)rhs.size(), rhsLen));
+                AppLogger::Debug(fmt::format("[Reject] {}={} -> rhs length {} != {}", tokenVecToString(lhs), rhs, (int)rhs.size(), rhsLen));
                 continue;
             }
 
-            std::string candidate = lhs + '=' + rhs;
-            bool ok = true;
-            for (std::size_t i = 0; i < expressions.size(); ++i) {
-                if (!matchesFeedback(candidate, expressions[i], colors[i])) {
-                    AppLogger::Debug(fmt::format("[Reject] {} mismatch vs guess '{}' (fb='{}')", candidate, expressions[i], colors[i]));
-                    ok = false;
-                    break;
-                }
-            }
-            if (ok) {
-                AppLogger::Info(fmt::format("[Accept] {}", candidate));
-                finalCandidates.push_back(candidate);
-            }
+            std::string candidate = tokenVecToString(lhs) + '=' + rhs;
+            finalCandidates.push_back(candidate);
         } // for lhsCandidates
     } // for eqPos
 
