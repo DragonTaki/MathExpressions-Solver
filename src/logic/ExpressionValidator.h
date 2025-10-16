@@ -3,14 +3,16 @@
 // Do not distribute or modify
 // Author: DragonTaki (https://github.com/DragonTaki)
 // Create Date: 2025/10/01
-// Update Date: 2025/10/01
-// Version: v1.0
+// Update Date: 2025/10/16
+// Version: v1.1
 /* ----- ----- ----- ----- */
 
 #pragma once
+#include <cmath>
 #include <optional>
 #include <string>
 #include <unordered_set>
+#include <vector>
 
 /**
  * @class ExpressionValidator
@@ -50,25 +52,25 @@ public:
     /**
      * @brief Evaluates a mathematical expression string.
      * @param s Input expression (e.g., "12+46*2").
-     * @return Result of the evaluated expression as `long long`.
+     * @return Result of the evaluated expression as `double`.
      * @throws std::runtime_error on invalid characters, division by zero,
      *         negative exponents, or malformed expressions.
      *
      * This method uses the instance's `validOps` to determine which operators
      * are allowed. Operator precedence and associativity are respected.
      */
-    long long evalExpr(const std::string& s);
+    double evalExpr(const std::string& s);
     
     /**
      * @brief Safely evaluates an expression, returning an optional result.
      * @param expr Input expression string.
-     * @return `std::optional<long long>` containing the evaluation result if successful,
+     * @return `std::optional<double>` containing the evaluation result if successful,
      *         or `std::nullopt` if an error occurred.
      *
      * This static method catches all exceptions from `evalExpr` and prevents
      * runtime crashes from invalid or malformed expressions.
      */
-    static std::optional<long long> safeEval(const std::string& expr);
+    static std::optional<double> safeEval(const std::string& expr);
 
     /**
      * @brief Validates a mathematical expression of a given length.
@@ -83,4 +85,12 @@ public:
      * - Expression length must match `n`.
      */
     bool isValidExpression(const std::string& s, int n);
+
+    bool isInteger(double val, double epsilon = 1e-9);
+
+    std::vector<std::string> filterExpressions(
+        const std::vector<std::string>& candidates,
+        const std::string& guess,
+        const std::string& color
+    );
 };

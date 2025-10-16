@@ -3,15 +3,15 @@
 // Do not distribute or modify
 // Author: DragonTaki (https://github.com/DragonTaki)
 // Create Date: 2025/10/05
-// Update Date: 2025/10/15
-// Version: v2.0
+// Update Date: 2025/10/16
+// Version: v2.1
 /* ----- ----- ----- ----- */
 
 #include <algorithm>
 #include <array>
 #include <cctype>
-#include <stdexcept>
 #include <format>
+#include <stdexcept>
 #include <unordered_set>
 
 #include "Constraint.h"
@@ -181,7 +181,7 @@ inline void updateConstraint(
  * @param INF Large integer representing "unknown upper bound" for max counts.
  * @param globalConflict Reference flag that becomes true if any conflict is found.
  */
-void processSingleGuess(
+void updateConstraintsMapWithSingleGuess(
     const std::string& expression,
     const std::string& color,
     std::unordered_map<char, Constraint>& constraintsMap,
@@ -322,7 +322,7 @@ std::unordered_map<char, Constraint> deriveConstraints(
         }
 
         // Accumulate constraint updates for this round
-        processSingleGuess(expression, color, constraintsMap, greenSymbolFlags, INF, globalConflict);
+        updateConstraintsMapWithSingleGuess(expression, color, constraintsMap, greenSymbolFlags, INF, globalConflict);
     }
 
     // Structural validation
@@ -361,4 +361,24 @@ std::unordered_map<char, Constraint> deriveConstraints(
     }
 
     return constraintsMap;
+}
+
+void updateConstraint(
+    std::unordered_map<char, Constraint>& constraintsMap,
+    const std::string& expression,
+    const std::string& color
+) {
+    // Error handling: Length error (should not be here)
+    if (expression.size() != color.size()) return;
+
+    const int INF = (int)expression.size();  ///< Upper bound for maxCount
+    bool globalConflict = false;             ///< Track if any conflicts occurred
+    std::vector<bool> greenSymbolFlags(expression.size(), false);  ///< Mark green operators
+
+    // Use updateConstraintsMapWithSingleGuess to update the existing Constraints Map
+    updateConstraintsMapWithSingleGuess(expression, color, constraintsMap, greenSymbolFlags, INF, globalConflict);
+
+    if (globalConflict) {
+        AppLogger::Warn("[UpdateConstraint] Detected conflicts in this update.");
+    }
 }

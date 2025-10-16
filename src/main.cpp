@@ -3,8 +3,8 @@
 // Do not distribute or modify
 // Author: DragonTaki (https://github.com/DragonTaki)
 // Create Date: 2025/09/28
-// Update Date: 2025/10/01
-// Version: v1.0
+// Update Date: 2025/10/16
+// Version: v2.0
 /* ----- ----- ----- ----- */
 
 #include <iostream>
@@ -97,6 +97,7 @@ bool readLengthAndOps(int& length, unordered_set<char>& operators) {
 
         return true;
     }
+    return false;
 }
 
 // -------------------- Read math expression --------------------
@@ -119,6 +120,7 @@ bool readExpression(string& expression, int length, ExpressionValidator& validat
         expression = line;
         return true;
     }
+    return false;
 }
 
 // -------------------- Read color feedback --------------------
@@ -141,13 +143,16 @@ bool readColorFeedback(string& color, int length) {
         color = line;
         return true;
     }
+    return false;
 }
 
 // -------------------- Main function --------------------
 int main() {
+    // Initialize program
     ios::sync_with_stdio(false);
     cin.tie(nullptr);
 
+    // Initialize AppLogger
     AppLogger::Initialize();
     std::atexit([]() {
         AppLogger::Shutdown();
@@ -156,52 +161,95 @@ int main() {
     AppLogger::SetLogLevel(LogLevel::Trace);
     AppLogger::Log(std::format("__cplusplus = {}", __cplusplus), LogLevel::Debug);
     
-    while (true) {
+    // Input first round: length & operators, first expression, first color feedback
+    auto firstInput = [&]() -> std::vector<std::string> {
         int length;
         unordered_set<char> operators;
+        
+        // Error handling & Read expression length and available operators
+        if (!readLengthAndOps(length, operators))
+            throw std::runtime_error("Failed to read length and operators");
 
-        // Read expression length and available operators
-        if (!readLengthAndOps(length, operators)) break;
-
-        unordered_set<char> validOpsSet(operators.begin(), operators.end());
-        char eqSign = '=';
-        vector<string> expressions, colors;
+        vector<string> expressions;  ///< Player-guessed expressions
+        vector<string> colors;       ///< Game-feedback colors
 
         ExpressionValidator validator;
-        validator.setValidOps(validOpsSet);
+        validator.setValidOps(operators);
+    
+        // First time read expression and color feedback
+        string expression;
+        if (!readExpression(expression, length, validator))
+            throw std::runtime_error("Failed to read first expression");
+        expressions.push_back(expression);
 
-        // Read muiltiple expressions and their color feedbacks
-        while (true) {
-            string expression;
-            if (!readExpression(expression, length, validator)) break;
+        string color;
+        if (!readColorFeedback(color, length))
+            throw std::runtime_error("Failed to read first color feedback");
+        colors.push_back(color);
 
-            string color;
-            if (!readColorFeedback(color, length)) break;
-
-            expressions.push_back(expression);
-            colors.push_back(color);
-        }
-
-        // Display input summary
-        cout << "\n--- Input Summary ---\n";
-        cout << "Length: " << length << "\n";
-        cout << "Operators: ";
-        for (char c : operators) cout << c << " ";
-        cout << "\nGuesses & Colors:\n";
-        for (size_t i = 0; i < expressions.size(); i++) {
-            cout << expressions[i] << " -> " << colors[i] << "\n";
-        }
-
+        // Generate initial candidates by using CandidateGenerator
         CandidateGenerator generator(validator);
-        AppLogger::Log(std::format("Created generator"), LogLevel::Debug);
         auto results = generator.generate(length, operators, expressions, colors);
 
-        if (results.empty()) std::cout << "No solution.\n";
-        else for (auto& r : results) std::cout << r << "\n";
+        if (results.empty())
+            std::cout << "No solution.\n";
+        else {
+            std::cout << "--- First round candidates ---\n";
+            for (auto& r : results)
+                std::cout << r << "\n";
+        }
 
-        cout << "\nYou can input a new first line to start a new round.\n\n";
+        return results;
+    };
+
+    while (true) {
+        try {
+            // First input, generate initial candidates
+            std::vector<std::string> candidates = firstInput();
+            
+            // Subsequent input, filtering from existing candidates
+            auto nextInput = [&](std::vector<std::string>& currentCandidates) -> bool {
+                // Error handling: Empty candidates (should not be here)
+                if (currentCandidates.empty()) return false;
+
+                string expression;  ///< Following expression guess, or "end" for end whole round
+                cout << "\nEnter your guess (or 'end' to finish this round): ";
+                if (!std::getline(cin, expression)) return false;
+                if (expression == "end") return false;
+
+                string color;       ///< The color pairing the expression
+                cout << "Enter color feedback: ";
+                if (!std::getline(cin, color)) return false;
+
+                // Filter candidates
+                ExpressionValidator validator;
+                currentCandidates = validator.filterExpressions(currentCandidates, expression, color);
+
+                // Show filtered results
+                std::cout << "--- Filtered candidates ---\n";
+                if (currentCandidates.empty())
+                    std::cout << "No solution.\n";
+                else
+                    for (auto& c : currentCandidates)
+                        std::cout << c << "\n";
+
+                return true;
+            };
+
+            // Main process logic
+            while (nextInput(candidates)) {
+                // Will continue to let the player to enter new guesses and colors, until "end" is entered
+            }
+
+            // Game ended, start new game
+            std::cout << "\nRound finished. Start a new round.\n\n";
+        } catch (const std::exception& e) {
+            std::cerr << "Error: " << e.what() << "\n";
+            break;
+        }
     }
 
+    // Program ending procedure
     AppLogger::Shutdown();
     return 0;
 }

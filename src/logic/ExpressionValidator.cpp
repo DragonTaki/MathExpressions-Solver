@@ -3,8 +3,8 @@
 // Do not distribute or modify
 // Author: DragonTaki (https://github.com/DragonTaki)
 // Create Date: 2025/10/01
-// Update Date: 2025/10/01
-// Version: v1.0
+// Update Date: 2025/10/16
+// Version: v1.1
 /* ----- ----- ----- ----- */
 
 #include <optional>
@@ -57,10 +57,10 @@ namespace {
      * @param a Left-hand operand
      * @param b Right-hand operand
      * @param op Operator character ('+', '-', '*', '/', '^')
-     * @return long long Result of the operation
+     * @return double Result of the operation
      * @throws runtime_error On invalid operator, division by zero, or negative exponent
      */
-    long long applyOp(long long a, long long b, char op) {
+    double applyOp(double a, double b, char op) {
         switch (op) {
             case '+': return a + b;
             case '-': return a - b;
@@ -70,7 +70,7 @@ namespace {
                 return a / b;
             case '^': {
                 if (b < 0) throw runtime_error("Negative exponent not supported");
-                long long res = 1;
+                double res = 1;
                 for (int i = 0; i < b; i++) res *= a;
                 return res;
             }
@@ -79,6 +79,7 @@ namespace {
     }
 } // anonymous namespace
 
+// ---- Public API ----
 // ---- Shunting Yard + RPN Evaluate ----
 
 /**
@@ -92,10 +93,10 @@ namespace {
  * Supports multi-digit integers.
  *
  * @param s Expression string (e.g., "12+3*4")
- * @return long long Evaluation result
+ * @return double Evaluation result
  * @throws runtime_error If expression contains invalid characters, malformed RPN, or illegal operations
  */
-long long ExpressionValidator::evalExpr(const string& s) {
+double ExpressionValidator::evalExpr(const string& s) {
     vector<string> output;   // RPN output queue
     stack<char> opsStack;    // Operator stack
     string num;              // Buffer for multi-digit numbers
@@ -133,14 +134,14 @@ long long ExpressionValidator::evalExpr(const string& s) {
     }
 
     // --- RPN Evaluation ---
-    stack<long long> st;
+    stack<double> st;
     for (auto& token : output) {
         if (isdigit(token[0])) {
             st.push(stoll(token));
         } else {
             if (st.size() < 2) throw runtime_error("Malformed expression");
-            long long b = st.top(); st.pop();
-            long long a = st.top(); st.pop();
+            double b = st.top(); st.pop();
+            double a = st.top(); st.pop();
             st.push(applyOp(a, b, token[0]));
         }
     }
@@ -157,19 +158,17 @@ long long ExpressionValidator::evalExpr(const string& s) {
  * </summary>
  *
  * @param expr Expression string
- * @return std::optional<long long> Evaluation result if successful; std::nullopt otherwise
+ * @return std::optional<double> Evaluation result if successful; std::nullopt otherwise
  */
-std::optional<long long> ExpressionValidator::safeEval(const std::string& expr) {
+std::optional<double> ExpressionValidator::safeEval(const std::string& expr) {
     try {
         ExpressionValidator validator;
-        long long res = validator.evalExpr(expr);
+        double res = validator.evalExpr(expr);
         return res;
     } catch (...) {
         return std::nullopt;
     }
 }
-
-// ---- Public API ----
 
 /**
  * @brief Checks whether a string is a valid arithmetic equation.
@@ -198,10 +197,99 @@ bool ExpressionValidator::isValidExpression(const string& s, int n) {
     if (left.empty() || right.empty()) return false;
 
     try {
-        long long lv = evalExpr(left);
-        long long rv = evalExpr(right);
+        double lv = evalExpr(left);
+        double rv = evalExpr(right);
         return lv == rv;
     } catch (...) {
         return false;
     }
+}
+
+/**
+ * @brief Checks whether a double value is effectively an integer, considering floating-point precision.
+ *
+ * @param val Value to check
+ * @param epsilon Allowed tolerance (default 1e-9)
+ * @return true if val is an integer within tolerance
+ */
+bool ExpressionValidator::isInteger(double val, double epsilon) {
+    double nearest = std::round(val);               // Nearest integer
+    return std::abs(val - nearest) < epsilon;       // Gap < epsilon => Considered as integer
+}
+
+/**
+ * @brief 過濾候選運算式，保留符合本輪猜測顏色限制的項目
+ * 
+ * @param candidates 上一輪候選運算式
+ * @param guess 玩家本輪猜測運算式
+ * @param color 對應的顏色串（例如 "gyr..."）
+ * @return vector<string> 篩選後的候選列表
+ */
+vector<string> ExpressionValidator::filterExpressions(
+    const vector<string>& candidates,
+    const string& guess,
+    const string& color)
+{
+    vector<string> filtered;
+
+    for (const auto& cand : candidates) {
+        bool valid = true;
+
+        // Error handling: Length check (should not be here)
+        if (cand.size() != guess.size() || cand.size() != color.size()) {
+            continue;
+        }
+
+        // 檢查每個位置
+        unordered_multiset<char> guessRemaining;
+        for (size_t i = 0; i < guess.size(); ++i) {
+            char charactor = guess[i];
+            char charactorColor = color[i];
+
+            if (charactorColor == 'g') { // 綠色：位置正確
+                if (cand[i] != charactor) {
+                    valid = false;
+                    break;
+                }
+            } else {
+                // 暫存非綠色字元，後面用於黃色檢查
+                guessRemaining.insert(charactor);
+            }
+        }
+
+        if (!valid) continue;
+
+        // 再檢查黃色：字元必須存在於候選中，但位置不同
+        for (size_t i = 0; i < guess.size(); ++i) {
+            char c = guess[i];
+            char charactorColor = color[i];
+            if (charactorColor == 'y') {
+                if (cand[i] == c || guessRemaining.count(c) == 0) {
+                    valid = false;
+                    break;
+                } else {
+                    guessRemaining.erase(guessRemaining.find(c));
+                }
+            }
+        }
+
+        if (!valid) continue;
+
+        // 灰色/紅色：字元不應出現在候選解的其他位置（已被綠黃排除的字元會先被消耗掉）
+        for (size_t i = 0; i < guess.size(); ++i) {
+            char charactor = guess[i];
+            char charactorColor = color[i];
+            if (charactorColor == 'r') {
+                // 如果候選還有此字元且不是已確認綠黃位置
+                if (count(cand.begin(), cand.end(), charactor) > 0) {
+                    valid = false;
+                    break;
+                }
+            }
+        }
+
+        if (valid) filtered.push_back(cand);
+    }
+
+    return filtered;
 }

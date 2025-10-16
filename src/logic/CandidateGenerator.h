@@ -3,14 +3,14 @@
 // Do not distribute or modify
 // Author: DragonTaki (https://github.com/DragonTaki)
 // Create Date: 2025/10/02
-// Update Date: 2025/10/02
-// Version: v1.0
+// Update Date: 2025/10/16
+// Version: v2.0
 /* ----- ----- ----- ----- */
 
 #pragma once
 #include <string>
-#include <vector>
 #include <unordered_set>
+#include <vector>
 
 #include "Constraint.h"
 #include "ExpressionValidator.h"
@@ -32,7 +32,8 @@ public:
         int length,
         const std::unordered_set<char>& operators,
         const std::vector<std::string>& expressions,
-        const std::vector<std::string>& colors);
+        const std::vector<std::string>& colors
+    );
 
 private:
     ExpressionValidator& validator;
@@ -40,22 +41,30 @@ private:
     bool isRhsLengthFeasible(
         int lhsLen,
         int rhsLen,
-        const std::unordered_set<char>& operators) const;
+        const std::unordered_set<char>& operators
+    ) const;
 
     void _dfsGenerateLeftTokens(
         int lhsLen,
         const std::unordered_set<char>& operators,
         std::vector<Expr::Token>& current,
         std::vector<std::vector<Expr::Token>>& lhsCandidates,
-        std::unordered_map<char, Constraint>* lhsConstraintsMap,
+        std::unordered_map<char, Constraint>& lhsConstraintsMap,
         const std::vector<char>& requiredAtPos,
-        int depth);
+        int depth
+    );
+
+    bool isCandidateValid(
+        const std::string& expr,
+        const std::unordered_map<char, Constraint>& constraints
+    );
 
     void generateLeftTokens(
         int lhsLen,
         const std::unordered_set<char>& operators,
         std::vector<Expr::Token> current,
         std::vector<std::vector<Expr::Token>>& lhsCandidates,
-        std::unordered_map<char, Constraint>* lhsConstraintsMap,
-        int depth);
+        std::unordered_map<char, Constraint>& lhsConstraintsMap,
+        int depth
+    );
 };

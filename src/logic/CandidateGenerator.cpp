@@ -3,8 +3,8 @@
 // Do not distribute or modify
 // Author: DragonTaki (https://github.com/DragonTaki)
 // Create Date: 2025/10/02
-// Update Date: 2025/10/02
-// Version: v1.0
+// Update Date: 2025/10/16
+// Version: v2.0
 /* ----- ----- ----- ----- */
 
 #include <cctype>
@@ -32,7 +32,11 @@ std::string tokenVecToString(const std::vector<Expr::Token>& tokens) {
     return s;
 }
 
-bool CandidateGenerator::isRhsLengthFeasible(int lhsLen, int rhsLen, const std::unordered_set<char>& operators) const {
+bool CandidateGenerator::isRhsLengthFeasible(
+    int lhsLen,
+    int rhsLen,
+    const std::unordered_set<char>& operators
+) const {
     if (lhsLen <= 0 || rhsLen <= 0) return false;
 
     // m = 數字塊數量 (numbers)，最多為 floor((lhsLen + 1) / 2)
@@ -152,121 +156,247 @@ void CandidateGenerator::_dfsGenerateLeftTokens(
     const std::unordered_set<char>& operators,
     std::vector<Expr::Token>& current,
     std::vector<std::vector<Expr::Token>>& lhsCandidates,
-    std::unordered_map<char, Constraint>* lhsConstraintsMap,
+    std::unordered_map<char, Constraint>& lhsConstraintsMap,
     const std::vector<char>& requiredAtPos,
-    int depth)
-{
+    int depth
+) {
     // Log for each depth
-    {
+    /*{
         std::string ops;
         for (char o : operators) ops.push_back(o), ops.push_back(' ');
-        AppLogger::Debug(fmt::format("[generateLeftTokens, depth={}] lhsLen={}, operators=[{}]", depth, lhsLen, ops));
-    }
+        AppLogger::Trace(fmt::format("[_dfs, depth={}] lhsLen={}, operators=[{}]", depth, lhsLen, ops));
+    }*/
 
-    // 計算目前 token 已佔長度
-    int pos = 0;
+    // Count used length
+    int usedLength = 0;
     for (const auto& t : current)
-        pos += static_cast<int>(t.value.size());
-
-    if (pos >= lhsLen) {
-        lhsCandidates.push_back(current);
+        usedLength += static_cast<int>(t.value.size());
+    // Not enough length, finish recursion
+    if (usedLength >= lhsLen) {
+        // Only token size >= 3 makes sence, e.g. "12 + 34", "9 * 3"
+        // Expression must end with digit token
+        if (!current.empty() &&
+            current.size() >= 3 &&
+            current.back().type == Expr::TokenType::Digit) {
+            lhsCandidates.push_back(current);
+        }
         return;
     }
 
-    // Initialize remainingMin (=minCount), for charactor remaining available prune
-    std::unordered_map<char,int> remainingMin;
-    if (lhsConstraintsMap) {
-        for (const auto& [ch, con] : *lhsConstraintsMap) {
-            remainingMin[ch] = con.minCount();
-            //AppLogger::Trace(fmt::format("[init] '{}' minCount={}", ch, con.minCount()));
-        }
+    // Calculate if remain required charactor can filled in, if not, than prune
+    int remainingLength = lhsLen - usedLength;
+    int totalMinRequired = 0;
+    for (const auto& [ch, con] : lhsConstraintsMap) {
+        int remaining = con.minCount() - con.usedCount();
+        if (remaining > 0) totalMinRequired += remaining;
+    }
+    if (remainingLength < totalMinRequired) {
+        /*AppLogger::Trace(fmt::format("[_dfs prune] Not enough space: remainingLength={} < totalMinRequired={}", 
+            remainingLength, totalMinRequired));*/
+        return;
     }
 
-    // --- Step 2: 檢查某個 token 是否可放在位置 pos ---
-    auto isTokenAllowedAt = [&](const Expr::Token& token, int pos) -> bool {
-        char ch = token.value[0]; // 第一個字符判斷，因為數字可能多位
-        bool allowed = true;
+    // Charactor-level check
+    auto isCharAllowed = [&](char ch) -> bool {
+        auto it = lhsConstraintsMap.find(ch);
 
-        if (pos < (int)requiredAtPos.size() && requiredAtPos[pos] != 0) {
-            if (requiredAtPos[pos] != ch) return false;
+        // Error handling, should not happened
+        if (it == lhsConstraintsMap.end()) {
+            //AppLogger::Trace(fmt::format("[_dfs, now='{}'] Try {}, passed: not exist in constraints map", tokenVecToString(current), ch));
+            return false;
         }
 
-        if (lhsConstraintsMap) {
-            auto it = lhsConstraintsMap->find(ch);
-            if (it != lhsConstraintsMap->end()) {
-                const Constraint& con = it->second;
-                int used = 0;
-                for (const auto& t : current) {
-                    if (t.value == token.value) used++;
-                }
+        const Constraint& con = it->second;
 
-                if (con.maxCount() != 0 && used >= con.maxCount()) allowed = false;
-                if (con.bannedPos().count(pos) > 0) allowed = false;
-            }
+        // Only got 'r' color, not contained in answer
+        if (con.minCount() == 0 && con.maxCount() == 0) {
+            //AppLogger::Trace(fmt::format("[_dfs, now='{}'] Try {}, skipped: forbidden (min=max=0)", tokenVecToString(current), ch));
+            return false;
         }
 
-        return allowed;
+        // Got some 'g'/'y', and has 'r' to restrict the max use
+        if (con.usedCount() >= con.maxCount()) {
+            //AppLogger::Trace(fmt::format("[_dfs, now='{}'] Try {}, skipped: Reach max usage limit {}", tokenVecToString(current), ch, con.maxCount()));
+            return false;
+        }
+
+        return true;
     };
 
-    // 嘗試每個可能字符
-    for (char ch = '0'; ch <= '9'; ++ch) {
-        auto it = lhsConstraintsMap ? lhsConstraintsMap->find(ch) : lhsConstraintsMap->end();
+    // Position-level check
+    auto isCharAllowedAtPos = [&](char ch, int pos) -> bool {
+        auto it = lhsConstraintsMap.find(ch);
 
-        if (it != lhsConstraintsMap->end()) {
+        // The charactor got 'y' or 'r' at this position, means not allowed here
+        if (it != lhsConstraintsMap.end()) {
             const Constraint& con = it->second;
-
-            // forbidden
-            if (con.minCount() == 0 && con.maxCount() == 0) {
-                AppLogger::Trace(fmt::format("[Constraint] Skipped digit {}: forbidden (min=max=0)", ch));
-                continue;
-            }
-
-            // banned positions
             if (con.bannedPos().count(pos)) {
-                AppLogger::Trace(fmt::format("[Constraint] Skipped digit {}: banned positions", ch));
-                continue;
+                //AppLogger::Trace(fmt::format("[_dfs, now='{}'] Try {}, skipped: Disallowed at pos {}", tokenVecToString(current), ch, pos));
+                return false;
+            }
+        }
+
+        return true;
+    };
+
+    // Token-level check
+    auto isTokenValid = [&](const Expr::Token& token) -> bool {
+        if (token.type == Expr::TokenType::Digit) {
+            const std::string& v = token.value;
+
+            // Error handling: Token couldn't be empty (shouldn't be here)
+            if (v.empty()) {
+                return false;
             }
 
-            // optional: 檢查 maxCount 是否已達限制
-            if (con.usedCount() >= con.maxCount()) {
-                AppLogger::Trace(fmt::format("[Constraint] Skipped digit {}: Usage reach max limit {}", ch, con.maxCount()));
-                continue;
-            } // 已達上限
+            // Digit token should not be "0", or start with '0' 
+            if (v[0] == '0') {
+                return false;
+            }
+
+            // Check if all digits (shouldn't be here)
+            for (char c : v) {
+                if (!std::isdigit(static_cast<unsigned char>(c)))
+                    return false;
+            }
+
+            return true;
+        }
+        // No check for operator so far
+        // Single charactor checking already done in isCharAllowed() and isCharAllowedAtPos()
+
+        return true;
+    };
+
+    // Token-level check
+    auto isTokenSequenceValid = [&](const std::vector<Expr::Token>& tokens) -> bool {
+        if (tokens.empty()) return false;
+
+        const Expr::Token& last = tokens.back();         ///< Last token
+        const Expr::Token* prev = tokens.size() >= 2 ?   ///< Previous token
+            &tokens[tokens.size() - 2] : nullptr;
+        const Expr::Token* prev2 = tokens.size() >= 3 ?  ///< Previous' previous token
+            &tokens[tokens.size() - 3] : nullptr;
+
+        // Operator cannot be first charactor
+        if (tokens.size() == 1 && last.type == Expr::TokenType::Operator)
+            return false;
+        
+        // Operator logic check
+        if (last.type == Expr::TokenType::Operator) {
+
+            // Operator follow another operator is not allowed
+            if (prev && prev->type == Expr::TokenType::Operator) {
+                return false;
+            }
+
+            // Consecutive factorials are not allowed
+            if (prev2 && prev2->value == "^" && last.value == "^") {
+                return false;
+            }
+        }
+        // Digit logic check
+        else {
+            // '0' cannot follow '/'
+            if (!tokens.empty() && tokens.back().value == "/" && last.value == "0") {
+                return false;
+            }
         }
 
-        AppLogger::Trace(fmt::format("[Constraint] Trying digit {}", ch));
-        Expr::Token token{Expr::TokenType::Digit, std::string(1, ch)};
-        current.push_back(token);
+        return true;
+    };
 
-        // 更新使用次數
-        if (it != lhsConstraintsMap->end()) it->second.usedCount()++;
+    // Main logic for operators and digits
+    int pos = usedLength;  ///< Same value as used-length, but represent the position
+    auto tryAppendToken = [&](char ch) {
+        // Charactor-level and position-level check
+        if (!isCharAllowed(ch)) return;           // Check if the charactor should be passed
+        if (!isCharAllowedAtPos(ch, pos)) return; // Check if the position can fill in this charactor
 
-        _dfsGenerateLeftTokens(lhsLen, operators, current, lhsCandidates,
-                               lhsConstraintsMap, requiredAtPos, depth + 1);
+        // Auto determin token type
+        Expr::TokenType type =
+            (std::isdigit(static_cast<unsigned char>(ch)))
+                ? Expr::TokenType::Digit
+                : Expr::TokenType::Operator;
 
-        // 回溯
-        current.pop_back();
-        if (it != lhsConstraintsMap->end()) it->second.usedCount()--;
-    }
+        // Try to get last token
+        Expr::Token* last = current.empty() ? nullptr : &current.back();
 
-    for (char op : operators) {
-        Expr::Token token{Expr::TokenType::Operator, std::string(1, op)};
-        if (!isTokenAllowedAt(token, pos)) continue;
+        // Merge check (If prev == digit && this == digit)
+        bool isMerged = false;
+        Expr::Token newToken{type, std::string(1, ch)};
+        // Previous token == digit && this token == digit => Merge
+        if (last && last->type == Expr::TokenType::Digit && type == Expr::TokenType::Digit) {
+            // Digit start with '0' is not allowed
+            if (last->value.size() == 1 && last->value[0] == '0') {
+                return;
+            }
+            last->value.push_back(ch);
+            isMerged = true;
+        }
+        // Cannot merge, generate new token
+        else {
+            // Already generated, nothing to do
+        }
 
-        // 運算子檢查
-        if (!current.empty()) {
-            Expr::Token last = current.back();
-            if (last.type == Expr::TokenType::Operator) continue; // 不允許連續運算子
-            if (last.value == "^" && token.value == "^") continue; // 不允許連續 ^
+        // Finalize previous token (when type changes or token ends)
+        // Only when NOT merged (e.g., operator after digit, digit after operator)
+        if (!isMerged && last) {
+            if (!isTokenValid(*last)) {
+                // Previous token invalid => rollback (don't proceed)
+                return;
+            }
+        }
+
+        // Push
+        if (!isMerged) {
+            current.push_back({type, std::string(1, ch)});
         } else {
-            if (op != '+' && op != '-') continue; // 開頭只允許 +/-
+            // Already merged, nothing to do
         }
 
-        AppLogger::Trace(fmt::format("[Constraint] Trying operator {}", op));
-        current.push_back(token);
+        // After merge or adding new token, validate current sequence
+        if (!isTokenSequenceValid(current)) {
+            // Rollback merge if invalid
+            if (isMerged)
+                last->value.pop_back();
+            else
+                current.pop_back();
+            return;
+        }
+
+        //AppLogger::Trace(fmt::format("[_dfs, now='{}'] Try {}, accepted", tokenVecToString(current), ch));
+        if (lhsConstraintsMap.count(ch)) lhsConstraintsMap[ch].usedCount()++;
+
+        // Recursion
         _dfsGenerateLeftTokens(lhsLen, operators, current, lhsCandidates,
-                               lhsConstraintsMap, requiredAtPos, depth + 1);
-        current.pop_back();
+                            lhsConstraintsMap, requiredAtPos, depth + 1);
+
+        // Backtracking
+        if (lhsConstraintsMap.count(ch)) lhsConstraintsMap[ch].usedCount()--;
+        if (isMerged) {
+            last->value.pop_back();;
+        } else {
+            current.pop_back();
+        }
+    };
+
+    // Check if there's green position (only fill in specific charactor)
+    if (pos < (int)requiredAtPos.size() && requiredAtPos[pos] != 0) {
+        char fixedChar = requiredAtPos[pos];  ///< The charactor already known green here
+        //AppLogger::Trace(fmt::format("[_dfs, now='{}'] Fixed {}, accepted due to green pos", tokenVecToString(current), fixedChar));
+        Expr::TokenType type =
+            (operators.count(fixedChar) ? Expr::TokenType::Operator : Expr::TokenType::Digit);
+        tryAppendToken(fixedChar);
+    } else {
+        //AppLogger::Trace(fmt::format("[_dfs, now='{}'] No Fixed symbol, start trying 0-9 and ops...", tokenVecToString(current)));
+        // Try operators
+        for (char op : operators)
+            tryAppendToken(op);
+
+        // Try digits
+        for (char ch = '0'; ch <= '9'; ++ch)
+            tryAppendToken(ch);
     }
 }
 
@@ -275,28 +405,60 @@ void CandidateGenerator::generateLeftTokens(
     const std::unordered_set<char>& operators,
     std::vector<Expr::Token> current,
     std::vector<std::vector<Expr::Token>>& lhsCandidates,
-    std::unordered_map<char, Constraint>* lhsConstraintsMap,
-    int depth)
-{
-    // --- Step 0: 建立 requiredAtPos (僅建立一次) ---
+    std::unordered_map<char, Constraint>& lhsConstraintsMap,
+    int depth
+) {
+    // Create requiredAtPos (only 1 time)
     std::vector<char> requiredAtPos(lhsLen, 0);
-    if (lhsConstraintsMap) {
-        for (const auto& [ch, con] : *lhsConstraintsMap) {
-            for (int gp : con.greenPos()) {
-                if (gp >= 0 && gp < lhsLen) {
-                    if (requiredAtPos[gp] != 0 && requiredAtPos[gp] != ch) {
-                        AppLogger::Warn(fmt::format("[Constraint] conflict at pos {}: '{}' vs '{}'",
-                            gp, requiredAtPos[gp], ch));
-                    }
-                    requiredAtPos[gp] = ch;
+    for (const auto& [ch, con] : lhsConstraintsMap) {
+        for (int gp : con.greenPos()) {
+            if (gp >= 0 && gp < lhsLen) {
+                if (requiredAtPos[gp] != 0 && requiredAtPos[gp] != ch) {
+                    AppLogger::Warn(fmt::format("[Constraint] conflict at pos {}: '{}' vs '{}'",
+                        gp, requiredAtPos[gp], ch));
                 }
+                requiredAtPos[gp] = ch;
             }
         }
     }
 
-    // --- Step 1: 開始 DFS ---
+    // Logging for requiredAtPos
+    /*{
+        std::string repr;
+        for (int i = 0; i < (int)requiredAtPos.size(); ++i) {
+            char c = requiredAtPos[i];
+            if (c == 0)
+                repr += '_';   // '_' indicated empty space (not be fixed)
+            else
+                repr += c;
+        }
+        AppLogger::Trace(fmt::format("[Constraint] requiredAtPos = {}", repr));
+    }*/
+
+    // DFS to generate tokens
     _dfsGenerateLeftTokens(lhsLen, operators, current, lhsCandidates,
                            lhsConstraintsMap, requiredAtPos, depth);
+}
+
+bool CandidateGenerator::isCandidateValid(
+    const std::string& expr,
+    const std::unordered_map<char, Constraint>& constraints
+) {
+    // Count every charactor occurrences in expression
+    std::unordered_map<char, int> countMap;
+    for (char c : expr) {
+        countMap[c]++;
+    }
+
+    // Compare with constraint
+    for (const auto& [ch, con] : constraints) {
+        int cnt = countMap[ch];  // Default to 0 if not exist
+        if (cnt < con.minCount() || cnt > con.maxCount()) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 std::vector<string> CandidateGenerator::generate(
@@ -306,6 +468,64 @@ std::vector<string> CandidateGenerator::generate(
     const std::vector<string>& colors
 ) {
     std::vector<string> finalCandidates;  ///< Record possible answer(s)
+
+    auto formatResult = [&](double val, bool isInt) -> std::string {
+        if (isInt) {
+            return fmt::format("{}", static_cast<long long>(std::round(val)));
+        } else {
+            return fmt::format("{:.2f}", val);
+        }
+    };
+
+    auto tryCandidate = [&](const std::vector<Expr::Token>& lhsTokens,
+        int eqPos,
+        int lhsLen,
+        int rhsLen,
+        std::unordered_map<char, Constraint> constraints
+    ) {
+        std::string lhsString = tokenVecToString(lhsTokens);
+        //AppLogger::Trace(fmt::format("[Try eval] LHS='{}' (eqPos={}, lhsLen={})", lhsString, eqPos, lhsLen));
+
+        // Try to evaluate lhs
+        double lhsResult;
+        try {
+            lhsResult = validator.evalExpr(lhsString);
+        } catch (const std::exception& e) {
+            AppLogger::Trace(fmt::format("[Eval Fail] {} : {}", lhsString, e.what()));
+            return;
+        } catch (...) {
+            AppLogger::Trace(fmt::format("[Eval Fail] {} : unknown error", lhsString));
+            return;
+        }
+
+        // The answer must be integer
+        bool isInt = validator.isInteger(lhsResult);
+        std::string rhsString = formatResult(lhsResult, isInt);
+        if (!isInt) {
+            AppLogger::Trace(fmt::format("[rhs] Reject non-integer rhs {} => {}", lhsString, rhsString));
+            return;
+        }
+        // The answer never be negative
+        if (lhsResult < 0) {
+            AppLogger::Trace(fmt::format("[rhs] Reject negative rhs {} => {}", lhsString, rhsString));
+            return;
+        }
+        // Check if rhs length match rhsLen
+        int rhsSize = rhsString.size();
+        if (rhsSize != rhsLen) {
+            AppLogger::Trace(fmt::format("[rhs] {} = {} -> rhs length mismatch ({} != {})", lhsString, rhsString, rhsSize, rhsLen));
+            return;
+        }
+        // Check if "lhs + '=' + rhs" match constraint min/max
+        std::string candidate = lhsString + '=' + rhsString;
+        if(!isCandidateValid(candidate, constraints)) {
+            AppLogger::Trace(fmt::format("[rhs] Reject mismatch min/max exp {} = {}", lhsString, rhsString));
+            return;
+        }
+
+        AppLogger::Debug(fmt::format("[rhs] Accept rhs: {} = {}", lhsString, rhsString));
+        finalCandidates.push_back(candidate);
+    };
 
     // Build constraints
     std::unordered_map<char, Constraint> constraintsMap = deriveConstraints(expressions, colors, length);
@@ -393,52 +613,26 @@ std::vector<string> CandidateGenerator::generate(
 
         std::unordered_map<char, Constraint> lhsConstraintsMap = constraintsMap;
 
-        // 調整 minCount，考慮 RHS 可用空間
+        // Adjust minCount, considering available space on the RHS
         for (auto& [ch, con] : lhsConstraintsMap) {
-            int rhsAvailable = rhsLen; // 假設每個符號最多可用 RHS 空間補足
+            int rhsAvailable = rhsLen;
+            // Assume that each symbol can be filled with at most RHS space
             con.minCount() = (std::max)(0, con.minCount() - rhsAvailable);
-            // maxCount 可保留原始值
         }
 
         AppLogger::Debug("===== ===== ===== ===== ===== =====");
         AppLogger::Debug("===== Start to generate left tokens =====");
         AppLogger::Debug("===== ===== ===== ===== ===== =====");
         // call generator with forbidden and minReq and counts
-        generateLeftTokens(lhsLen, operators, tempLhsTokenVector, lhsCandidates, &lhsConstraintsMap, 0);
+        generateLeftTokens(lhsLen, operators, tempLhsTokenVector, lhsCandidates, lhsConstraintsMap, 0);
 
         AppLogger::Debug("===== ===== ===== ===== ===== =====");
         AppLogger::Debug("===== Start to eval left tokens =====");
         AppLogger::Debug("===== ===== ===== ===== ===== =====");
         // rest as before: eval each lhs, skip negatives, check rhs length and feedback
         for (auto& lhs : lhsCandidates) {
-            AppLogger::Debug(fmt::format("[Try] LHS='{}' (eqPos={}, lhsLen={})", tokenVecToString(lhs), eqPos, lhsLen));
-
-            long long lhsResult;
-            try {
-                lhsResult = validator.evalExpr(tokenVecToString(lhs));
-            } catch (const std::exception& e) {
-                AppLogger::Debug(fmt::format("[Eval Fail] {} : {}", tokenVecToString(lhs), e.what()));
-                continue;
-            } catch (...) {
-                AppLogger::Debug(fmt::format("[Eval Fail] {} : unknown error", tokenVecToString(lhs)));
-                continue;
-            }
-
-            // 1) 立刻排除負數（遊戲規則：RHS 不會是負數）
-            if (lhsResult < 0) {
-                AppLogger::Debug(fmt::format("[Reject Negative] {} => {}", tokenVecToString(lhs), lhsResult));
-                continue;
-            }
-
-            std::string rhs = to_string(lhsResult);
-            if ((int)rhs.size() != rhsLen) {
-                AppLogger::Debug(fmt::format("[Reject] {}={} -> rhs length {} != {}", tokenVecToString(lhs), rhs, (int)rhs.size(), rhsLen));
-                continue;
-            }
-
-            std::string candidate = tokenVecToString(lhs) + '=' + rhs;
-            finalCandidates.push_back(candidate);
-        } // for lhsCandidates
+            tryCandidate(lhs, eqPos, lhsLen, rhsLen, constraintsMap);
+        }
     } // for eqPos
 
     return finalCandidates;

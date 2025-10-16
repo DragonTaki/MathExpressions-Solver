@@ -30,7 +30,8 @@ using namespace std;
  */
 int main() {
     // === 1. 測資設定 ===
-    const string operators = "9+-*";
+    const int length = 9;
+    const string operators = "+-*";
     const string equation  = "198+7=205";
     const string feedback  = "yyyrrgrry";
 
@@ -49,7 +50,6 @@ int main() {
         // === 4. 建立 expressions / colors 容器 ===
         vector<string> expressions{equation};
         vector<string> colors{feedback};
-        int length = static_cast<int>(equation.size());
 
         // === 5. 推導 constraints ===
         unordered_map<char, Constraint> constraintsMap = deriveConstraints(expressions, colors, length);

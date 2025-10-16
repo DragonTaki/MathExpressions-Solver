@@ -3,8 +3,8 @@
 // Do not distribute or modify
 // Author: DragonTaki (https://github.com/DragonTaki)
 // Create Date: 2025/10/05
-// Update Date: 2025/10/15
-// Version: v2.0
+// Update Date: 2025/10/16
+// Version: v2.1
 /* ----- ----- ----- ----- */
 
 #pragma once
@@ -257,4 +257,10 @@ bool matchesFeedback(
     const std::string& expression,
     const std::string& color,
     const std::unordered_set<char>& allowedOps
+);
+
+void updateConstraint(
+    std::unordered_map<char, Constraint>& constraintsMap,
+    const std::string& expression,
+    const std::string& color
 );
