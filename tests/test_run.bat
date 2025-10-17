@@ -12,6 +12,7 @@ cl ^
 /I"../external/fmtlib/fmt_12.0.0" ^
 ../src/core/*.cpp ^
 ../src/logic/*.cpp ^
+../src/util/*.cpp ^
 test_run.cpp ^
 /Fe:test_run.exe
 

@@ -7,12 +7,11 @@
 // Version: v1.0
 /* ----- ----- ----- ----- */
 
+#include "LogFileManager.h"
 #include <chrono>
 #include <ctime>
 #include <iomanip>
 #include <iostream>
-
-#include "LogFileManager.h"
 
 namespace fs = std::filesystem;
 
@@ -65,8 +64,8 @@ bool LogFileManager::Initialize(const std::string& filename) {
     // Write log session header with timestamp
     auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     ofs_ << "\n========== Log Session Started: "
-          << std::put_time(std::localtime(&now), "%F %T")
-          << " ==========\n";
+         << std::put_time(std::localtime(&now), "%F %T")
+         << " ==========\n";
     ofs_.flush();  // Ensure header is written immediately
     return true;
 }
@@ -115,8 +114,8 @@ void LogFileManager::Shutdown() {
     // Write session footer
     auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     ofs_ << "========== Log Session Ended: "
-          << std::put_time(std::localtime(&now), "%F %T")
-          << " ==========\n\n";
+         << std::put_time(std::localtime(&now), "%F %T")
+         << " ==========\n\n";
     ofs_.close();  // Close file stream
 }
 

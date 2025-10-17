@@ -11,8 +11,12 @@
 #include <cmath>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+#include "Constraint.h"
+#include "ExpressionValidator.h"
 
 /**
  * @class ExpressionValidator
@@ -31,7 +35,7 @@ private:
     /**
      * @brief Set of allowed operators for the expression evaluation.
      */
-    std::unordered_set<char> validOps;
+    std::unordered_set<char> ValidOperatorsSet;
 
 public:
     /**
@@ -41,13 +45,13 @@ public:
     
     /**
      * @brief Sets the allowed operators for expression evaluation.
-     * @param ops A set of characters representing valid operators
+     * @param operatorsSet A set of characters representing valid operators
      *            (e.g., { '+', '-', '*', '/', '^' }).
      *
      * This must be called before evaluating expressions with `evalExpr` 
      * to ensure only permitted operators are used.
      */
-    void setValidOps(const std::unordered_set<char>& ops) { validOps = ops; }
+    void setValidOps(const std::unordered_set<char>& operatorsSet) { ValidOperatorsSet = operatorsSet; }
 
     /**
      * @brief Evaluates a mathematical expression string.
@@ -56,26 +60,26 @@ public:
      * @throws std::runtime_error on invalid characters, division by zero,
      *         negative exponents, or malformed expressions.
      *
-     * This method uses the instance's `validOps` to determine which operators
+     * This method uses the instance's `ValidOperatorsSet` to determine which operators
      * are allowed. Operator precedence and associativity are respected.
      */
-    double evalExpr(const std::string& s);
+    double evalExpr(const std::string& exprLine);
     
     /**
      * @brief Safely evaluates an expression, returning an optional result.
-     * @param expr Input expression string.
+     * @param exprLine Input expression string.
      * @return `std::optional<double>` containing the evaluation result if successful,
      *         or `std::nullopt` if an error occurred.
      *
      * This static method catches all exceptions from `evalExpr` and prevents
      * runtime crashes from invalid or malformed expressions.
      */
-    static std::optional<double> safeEval(const std::string& expr);
+    static std::optional<double> safeEval(const std::string& exprLine);
 
     /**
      * @brief Validates a mathematical expression of a given length.
-     * @param s Expression string to validate (e.g., "12+46=58").
-     * @param n Required length of the expression.
+     * @param exprLine Expression string to validate (e.g., "12+46=58").
+     * @param exprLength Required length of the expression.
      * @return `true` if the expression is valid and both sides of '=' evaluate equally,
      *         `false` otherwise.
      *
@@ -84,13 +88,12 @@ public:
      * - Left and right sides of '=' must both be valid expressions.
      * - Expression length must match `n`.
      */
-    bool isValidExpression(const std::string& s, int n);
+    bool isValidExpression(const std::string& exprLine, int exprLength);
 
-    bool isInteger(double val, double epsilon = 1e-9);
+    bool isInteger(double value, double epsilon = 1e-9);
 
     std::vector<std::string> filterExpressions(
-        const std::vector<std::string>& candidates,
-        const std::string& guess,
-        const std::string& color
+        const std::vector<std::string>& candidatesList,
+        const std::unordered_map<char, Constraint>& constraintsMap
     );
 };

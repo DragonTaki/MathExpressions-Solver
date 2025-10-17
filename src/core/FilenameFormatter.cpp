@@ -7,11 +7,10 @@
 // Version: v1.0
 /* ----- ----- ----- ----- */
 
+#include "FilenameFormatter.h"
 #include <ctime>
 #include <iomanip>
 #include <sstream>
-
-#include "FilenameFormatter.h"
 
 namespace FilenameFormatter
 {
@@ -49,10 +48,10 @@ namespace FilenameFormatter
 
         // Build zero-padded time components
         std::ostringstream year, month, day, hour, minute, second;
-        year << std::setw(4) << std::setfill('0') << (1900 + localTime.tm_year);
-        month << std::setw(2) << std::setfill('0') << (localTime.tm_mon + 1);
-        day << std::setw(2) << std::setfill('0') << localTime.tm_mday;
-        hour << std::setw(2) << std::setfill('0') << localTime.tm_hour;
+        year   << std::setw(4) << std::setfill('0') << (1900 + localTime.tm_year);
+        month  << std::setw(2) << std::setfill('0') << (localTime.tm_mon + 1);
+        day    << std::setw(2) << std::setfill('0') << localTime.tm_mday;
+        hour   << std::setw(2) << std::setfill('0') << localTime.tm_hour;
         minute << std::setw(2) << std::setfill('0') << localTime.tm_min;
         second << std::setw(2) << std::setfill('0') << localTime.tm_sec;
 

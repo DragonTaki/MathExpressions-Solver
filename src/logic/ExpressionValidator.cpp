@@ -7,15 +7,18 @@
 // Version: v1.1
 /* ----- ----- ----- ----- */
 
+#include "ExpressionValidator.h"
+#include <algorithm>
 #include <optional>
 #include <stack>
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <unordered_map>
+#include <unordered_set>
 
-#include "ExpressionValidator.h"
-
-using namespace std;
+#include "Constraint.h"
+#include "ConstraintUtils.h"
 
 namespace {
     /**
@@ -66,16 +69,16 @@ namespace {
             case '-': return a - b;
             case '*': return a * b;
             case '/':
-                if (b == 0) throw runtime_error("Division by zero");
+                if (b == 0) throw std::runtime_error("Division by zero");
                 return a / b;
             case '^': {
-                if (b < 0) throw runtime_error("Negative exponent not supported");
+                if (b < 0) throw std::runtime_error("Negative exponent not supported");
                 double res = 1;
                 for (int i = 0; i < b; i++) res *= a;
                 return res;
             }
         }
-        throw runtime_error("Invalid operator");
+        throw std::runtime_error("Invalid operator");
     }
 } // anonymous namespace
 
@@ -92,14 +95,14 @@ namespace {
  * Supports operators: +, -, *, /, ^ (exponentiation)
  * Supports multi-digit integers.
  *
- * @param s Expression string (e.g., "12+3*4")
+ * @param exprLine Expression string (e.g., "12+3*4")
  * @return double Evaluation result
  * @throws runtime_error If expression contains invalid characters, malformed RPN, or illegal operations
  */
-double ExpressionValidator::evalExpr(const string& s) {
-    vector<string> output;   // RPN output queue
-    stack<char> opsStack;    // Operator stack
-    string num;              // Buffer for multi-digit numbers
+double ExpressionValidator::evalExpr(const std::string& exprLine) {
+    std::vector<std::string> output;   // RPN output queue
+    std::stack<char> opsStack;    // Operator stack
+    std::string num;              // Buffer for multi-digit numbers
 
     auto flushNum = [&]() {
         if (!num.empty()) {
@@ -109,43 +112,43 @@ double ExpressionValidator::evalExpr(const string& s) {
     };
 
     // --- Shunting Yard Algorithm ---
-    for (char c : s) {
+    for (char c : exprLine) {
         if (isdigit(c)) {
             num.push_back(c);
-        } else if (validOps.count(c)) {
+        } else if (ValidOperatorsSet.count(c)) {
             flushNum();
-            while (!opsStack.empty() && validOps.count(opsStack.top())) {
+            while (!opsStack.empty() && ValidOperatorsSet.count(opsStack.top())) {
                 char top = opsStack.top();
                 if ((isLeftAssociative(c) && precedence(c) <= precedence(top)) ||
                     (!isLeftAssociative(c) && precedence(c) < precedence(top))) {
-                    output.push_back(string(1, top));
+                    output.push_back(std::string(1, top));
                     opsStack.pop();
                 } else break;
             }
             opsStack.push(c);
         } else {
-            throw runtime_error("Invalid character in expression");
+            throw std::runtime_error("Invalid character in expression");
         }
     }
     flushNum();
     while (!opsStack.empty()) {
-        output.push_back(string(1, opsStack.top()));
+        output.push_back(std::string(1, opsStack.top()));
         opsStack.pop();
     }
 
     // --- RPN Evaluation ---
-    stack<double> st;
+    std::stack<double> st;
     for (auto& token : output) {
         if (isdigit(token[0])) {
             st.push(stoll(token));
         } else {
-            if (st.size() < 2) throw runtime_error("Malformed expression");
+            if (st.size() < 2) throw std::runtime_error("Malformed expression");
             double b = st.top(); st.pop();
             double a = st.top(); st.pop();
             st.push(applyOp(a, b, token[0]));
         }
     }
-    if (st.size() != 1) throw runtime_error("Malformed RPN eval");
+    if (st.size() != 1) throw std::runtime_error("Malformed RPN eval");
     return st.top();
 }
 
@@ -157,14 +160,14 @@ double ExpressionValidator::evalExpr(const string& s) {
  * Returns std::nullopt if evaluation fails.
  * </summary>
  *
- * @param expr Expression string
+ * @param exprLine Expression string
  * @return std::optional<double> Evaluation result if successful; std::nullopt otherwise
  */
-std::optional<double> ExpressionValidator::safeEval(const std::string& expr) {
+std::optional<double> ExpressionValidator::safeEval(const std::string& exprLine) {
     try {
         ExpressionValidator validator;
-        double res = validator.evalExpr(expr);
-        return res;
+        double result = validator.evalExpr(exprLine);
+        return result;
     } catch (...) {
         return std::nullopt;
     }
@@ -181,25 +184,26 @@ std::optional<double> ExpressionValidator::safeEval(const std::string& expr) {
  * 4. Left and right sides evaluate to the same value
  * </summary>
  *
- * @param s Expression string (e.g., "12+35=47")
- * @param n Expected length of expression
+ * @param exprLine Expression string (e.g., "12+35=47")
+ * @param exprLength Expected length of expression
  * @return true if valid equation; false otherwise
  */
-bool ExpressionValidator::isValidExpression(const string& s, int n) {
-    if ((int)s.size() != n) return false;
+bool ExpressionValidator::isValidExpression(const std::string& exprLine, int exprLength) {
+    if ((int)exprLine.size() != exprLength) return false;
 
-    size_t eqPos = s.find('=');
-    if (eqPos == string::npos || s.find('=', eqPos+1) != string::npos)
+    size_t eqSignPosition = exprLine.find('=');
+    // If '=' not exist, or existed but at the string end
+    if (eqSignPosition == std::string::npos || exprLine.find('=', eqSignPosition + 1) != std::string::npos)
         return false;
 
-    string left = s.substr(0, eqPos);
-    string right = s.substr(eqPos+1);
-    if (left.empty() || right.empty()) return false;
+    std::string lhsExprLine = exprLine.substr(0, eqSignPosition);
+    std::string rhsExprLine = exprLine.substr(eqSignPosition + 1);
+    if (lhsExprLine.empty() || rhsExprLine.empty()) return false;
 
     try {
-        double lv = evalExpr(left);
-        double rv = evalExpr(right);
-        return lv == rv;
+        double lhsResult = evalExpr(lhsExprLine);
+        double rhsResult = evalExpr(rhsExprLine);
+        return lhsResult == rhsResult;
     } catch (...) {
         return false;
     }
@@ -208,88 +212,32 @@ bool ExpressionValidator::isValidExpression(const string& s, int n) {
 /**
  * @brief Checks whether a double value is effectively an integer, considering floating-point precision.
  *
- * @param val Value to check
+ * @param value Value to check
  * @param epsilon Allowed tolerance (default 1e-9)
  * @return true if val is an integer within tolerance
  */
-bool ExpressionValidator::isInteger(double val, double epsilon) {
-    double nearest = std::round(val);               // Nearest integer
-    return std::abs(val - nearest) < epsilon;       // Gap < epsilon => Considered as integer
+bool ExpressionValidator::isInteger(double value, double epsilon) {
+    double nearest = std::round(value);               // Nearest integer
+    return std::abs(value - nearest) < epsilon;       // Gap < epsilon => Considered as integer
 }
 
 /**
- * @brief 過濾候選運算式，保留符合本輪猜測顏色限制的項目
- * 
- * @param candidates 上一輪候選運算式
- * @param guess 玩家本輪猜測運算式
- * @param color 對應的顏色串（例如 "gyr..."）
- * @return vector<string> 篩選後的候選列表
+ * @brief Filter candidate expressions according to current constraints.
+ *
+ * @param candidates List of candidate expressions to filter
+ * @param constraintsMap Current constraints mapping character -> Constraint
+ * @return Filtered list of candidates satisfying all constraints
  */
-vector<string> ExpressionValidator::filterExpressions(
-    const vector<string>& candidates,
-    const string& guess,
-    const string& color)
-{
-    vector<string> filtered;
+std::vector<std::string> ExpressionValidator::filterExpressions(
+    const std::vector<std::string>& candidatesList,
+    const std::unordered_map<char, Constraint>& constraintsMap
+) {
+    std::vector<std::string> filteredCandidatesList;
 
-    for (const auto& cand : candidates) {
-        bool valid = true;
-
-        // Error handling: Length check (should not be here)
-        if (cand.size() != guess.size() || cand.size() != color.size()) {
-            continue;
-        }
-
-        // 檢查每個位置
-        unordered_multiset<char> guessRemaining;
-        for (size_t i = 0; i < guess.size(); ++i) {
-            char charactor = guess[i];
-            char charactorColor = color[i];
-
-            if (charactorColor == 'g') { // 綠色：位置正確
-                if (cand[i] != charactor) {
-                    valid = false;
-                    break;
-                }
-            } else {
-                // 暫存非綠色字元，後面用於黃色檢查
-                guessRemaining.insert(charactor);
-            }
-        }
-
-        if (!valid) continue;
-
-        // 再檢查黃色：字元必須存在於候選中，但位置不同
-        for (size_t i = 0; i < guess.size(); ++i) {
-            char c = guess[i];
-            char charactorColor = color[i];
-            if (charactorColor == 'y') {
-                if (cand[i] == c || guessRemaining.count(c) == 0) {
-                    valid = false;
-                    break;
-                } else {
-                    guessRemaining.erase(guessRemaining.find(c));
-                }
-            }
-        }
-
-        if (!valid) continue;
-
-        // 灰色/紅色：字元不應出現在候選解的其他位置（已被綠黃排除的字元會先被消耗掉）
-        for (size_t i = 0; i < guess.size(); ++i) {
-            char charactor = guess[i];
-            char charactorColor = color[i];
-            if (charactorColor == 'r') {
-                // 如果候選還有此字元且不是已確認綠黃位置
-                if (count(cand.begin(), cand.end(), charactor) > 0) {
-                    valid = false;
-                    break;
-                }
-            }
-        }
-
-        if (valid) filtered.push_back(cand);
+    for (auto& c : candidatesList) {
+        if (ConstraintUtils::isCandidateValid(c, constraintsMap))
+            filteredCandidatesList.push_back(c);
     }
 
-    return filtered;
+    return filteredCandidatesList;
 }

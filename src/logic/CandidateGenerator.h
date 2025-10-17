@@ -14,57 +14,45 @@
 
 #include "Constraint.h"
 #include "ExpressionValidator.h"
-
-namespace Expr {
-    enum class TokenType { Digit, Operator };
-
-    struct Token {
-        TokenType type;
-        std::string value; // 對於數字可能多位
-    };
-}
+#include "core/constants/ExpressionTokens.h"
 
 class CandidateGenerator {
 public:
     CandidateGenerator(ExpressionValidator& validator);
 
     std::vector<std::string> generate(
-        int length,
-        const std::unordered_set<char>& operators,
+        int expLength,
+        const std::unordered_set<char>& operatorsSet,
         const std::vector<std::string>& expressions,
-        const std::vector<std::string>& colors
+        const std::vector<std::string>& expressionColors,
+        std::unordered_map<char, Constraint>& constraintsMap
     );
 
 private:
     ExpressionValidator& validator;
 
     bool isRhsLengthFeasible(
-        int lhsLen,
-        int rhsLen,
-        const std::unordered_set<char>& operators
+        int lhsLength,
+        int rhsLength,
+        const std::unordered_set<char>& operatorsSet
     ) const;
 
     void _dfsGenerateLeftTokens(
-        int lhsLen,
-        const std::unordered_set<char>& operators,
-        std::vector<Expr::Token>& current,
-        std::vector<std::vector<Expr::Token>>& lhsCandidates,
+        int lhsLength,
+        const std::unordered_set<char>& operatorsSet,
+        std::vector<Expression::Token>& currentTokens,
+        std::vector<std::vector<Expression::Token>>& lhsCandidatesList,
         std::unordered_map<char, Constraint>& lhsConstraintsMap,
-        const std::vector<char>& requiredAtPos,
-        int depth
-    );
-
-    bool isCandidateValid(
-        const std::string& expr,
-        const std::unordered_map<char, Constraint>& constraints
+        const std::vector<char>& requiredCharsAtPos,
+        int dfsDepth
     );
 
     void generateLeftTokens(
-        int lhsLen,
-        const std::unordered_set<char>& operators,
-        std::vector<Expr::Token> current,
-        std::vector<std::vector<Expr::Token>>& lhsCandidates,
+        int lhsLength,
+        const std::unordered_set<char>& operatorsSet,
+        std::vector<Expression::Token> currentTokens,
+        std::vector<std::vector<Expression::Token>>& lhsCandidatesList,
         std::unordered_map<char, Constraint>& lhsConstraintsMap,
-        int depth
+        int dfsDepth
     );
 };

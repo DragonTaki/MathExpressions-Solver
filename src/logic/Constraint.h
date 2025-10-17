@@ -22,7 +22,7 @@
  * BaseConstraint (digit or symbol) is currently active.
  * </summary>
  */
-enum class ConstraintType { Digit, Symbol };
+enum class ConstraintType { Digit, Operator };
 
 /**
  * @struct BaseConstraint
@@ -31,7 +31,7 @@ enum class ConstraintType { Digit, Symbol };
  * <summary>
  * Stores the common data for any character in a candidate expression,
  * including positional restrictions, occurrence counts, and conflict flags.
- * This struct is embedded inside more specific constraint types such as SymbolConstraint or DigitConstraint.
+ * This struct is embedded inside more specific constraint types such as OperatorConstraint or DigitConstraint.
  *
  * Members:
  * - `minCount`: Minimum required occurrences of the character.
@@ -88,7 +88,7 @@ struct DigitConstraint : BaseConstraint {
 };
 
 /**
- * @struct SymbolConstraint
+ * @struct OperatorConstraint
  * @brief Constraints specific to non-digit symbols (operators) in the expression.
  *
  * <summary>
@@ -100,7 +100,7 @@ struct DigitConstraint : BaseConstraint {
  * - Inherits all BaseConstraint members (minCount, maxCount, greenPos, bannedPos, hasConflict).
  * </summary>
  */
-struct SymbolConstraint : BaseConstraint {
+struct OperatorConstraint : BaseConstraint {
     StructuralConstraint structure;    ///< Structural rules and conflicts
     using BaseConstraint::BaseConstraint;
 };
@@ -116,9 +116,9 @@ struct SymbolConstraint : BaseConstraint {
  * and conflict flags. Symbol structural rules are accessible via `structure()`.
  *
  * Members:
- * - `type`  : Indicates whether this is a digit or symbol constraint.
- * - `digit` : Digit-specific constraint fields.
- * - `symbol`: Symbol-specific constraint fields.
+ * - `type`              : Indicates whether this is a digit or symbol constraint.
+ * - `digitConstraint`   : Digit-specific constraint fields.
+ * - `operatorConstraint`: Operator-specific constraint fields.
  *
  * Methods:
  * - Unified getters/setters for `minCount`, `maxCount`, `greenPos`, `bannedPos`, `hasConflict`.
@@ -126,9 +126,18 @@ struct SymbolConstraint : BaseConstraint {
  * </summary>
  */
 struct Constraint {
-    ConstraintType type;               ///< Indicates whether the character is a digit or symbol
-    DigitConstraint digit;             ///< Digit-specific constraints
-    SymbolConstraint symbol;           ///< Operator-specific constraints
+    ConstraintType type;                    ///< Indicates whether the character is a digit or symbol
+    DigitConstraint digitConstraint;        ///< Digit-specific constraints
+    OperatorConstraint operatorConstraint;  ///< Operator-specific constraints
+
+    // 無參建構函數，初始化為 Digit 或 Symbol 默認值
+    Constraint() : type(ConstraintType::Digit), digitConstraint(0), operatorConstraint(0) {}
+    
+    // 建構函數：自動判斷數字或符號
+    Constraint(char c) {
+        if (std::isdigit(c)) type = ConstraintType::Digit;
+        else type = ConstraintType::Operator;
+    }
 
     /**
      * @brief Get or modify the minimum required occurrences of this character.
@@ -139,8 +148,14 @@ struct Constraint {
      * </summary>
      * @return Reference to minCount
      */
-    int& minCount() { return type == ConstraintType::Digit ? digit.minCount : symbol.minCount; }
-    const int& minCount() const { return type == ConstraintType::Digit ? digit.minCount : symbol.minCount; }
+    int& minCount() {
+        return type == ConstraintType::Digit
+            ? digitConstraint.minCount : operatorConstraint.minCount;
+    }
+    const int& minCount() const {
+        return type == ConstraintType::Digit
+            ? digitConstraint.minCount : operatorConstraint.minCount;
+    }
     
     /**
      * @brief Get or modify the maximum allowed occurrences of this character.
@@ -150,8 +165,14 @@ struct Constraint {
      * </summary>
      * @return Reference to maxCount
      */
-    int& maxCount() { return type == ConstraintType::Digit ? digit.maxCount : symbol.maxCount; }
-    const int& maxCount() const { return type == ConstraintType::Digit ? digit.maxCount : symbol.maxCount; }
+    int& maxCount() {
+        return type == ConstraintType::Digit
+            ? digitConstraint.maxCount : operatorConstraint.maxCount;
+    }
+    const int& maxCount() const {
+        return type == ConstraintType::Digit
+            ? digitConstraint.maxCount : operatorConstraint.maxCount;
+    }
 
     /**
      * @brief Access confirmed positions (green feedback) for this character.
@@ -163,8 +184,14 @@ struct Constraint {
      * </summary>
      * @return Reference to greenPos set
      */
-    std::unordered_set<int>& greenPos() { return type == ConstraintType::Digit ? digit.greenPos : symbol.greenPos; }
-    const std::unordered_set<int>& greenPos() const { return type == ConstraintType::Digit ? digit.greenPos : symbol.greenPos; }
+    std::unordered_set<int>& greenPos() {
+        return type == ConstraintType::Digit
+            ? digitConstraint.greenPos : operatorConstraint.greenPos;
+    }
+    const std::unordered_set<int>& greenPos() const {
+        return type == ConstraintType::Digit
+            ? digitConstraint.greenPos : operatorConstraint.greenPos;
+    }
 
     /**
      * @brief Access positions where this character is banned.
@@ -175,8 +202,14 @@ struct Constraint {
      * </summary>
      * @return Reference to bannedPos set
      */
-    std::unordered_set<int>& bannedPos() { return type == ConstraintType::Digit ? digit.bannedPos : symbol.bannedPos; }
-    const std::unordered_set<int>& bannedPos() const { return type == ConstraintType::Digit ? digit.bannedPos : symbol.bannedPos; }
+    std::unordered_set<int>& bannedPos() {
+        return type == ConstraintType::Digit
+            ? digitConstraint.bannedPos : operatorConstraint.bannedPos;
+    }
+    const std::unordered_set<int>& bannedPos() const {
+        return type == ConstraintType::Digit
+            ? digitConstraint.bannedPos : operatorConstraint.bannedPos;
+    }
 
     /**
      * @brief Access or modify the conflict flag for this character.
@@ -187,8 +220,14 @@ struct Constraint {
      * </summary>
      * @return Reference to hasConflict
      */
-    bool& hasConflict() { return type == ConstraintType::Digit ? digit.hasConflict : symbol.hasConflict; }
-    const bool& hasConflict() const { return type == ConstraintType::Digit ? digit.hasConflict : symbol.hasConflict; }
+    bool& hasConflict() {
+        return type == ConstraintType::Digit
+            ? digitConstraint.hasConflict : operatorConstraint.hasConflict;
+    }
+    const bool& hasConflict() const {
+        return type == ConstraintType::Digit
+            ? digitConstraint.hasConflict : operatorConstraint.hasConflict;
+    }
 
     /**
      * @brief Get or modify the used count of this character. For lhs generation.
@@ -199,21 +238,46 @@ struct Constraint {
      * </summary>
      * @return Reference to usedCount
      */
-    int& usedCount() { return type == ConstraintType::Digit ? digit.usedCount : symbol.usedCount; }
-    const int& usedCount() const { return type == ConstraintType::Digit ? digit.usedCount : symbol.usedCount; }
+    int& usedCount() {
+        return type == ConstraintType::Digit
+            ? digitConstraint.usedCount : operatorConstraint.usedCount;
+    }
+    const int& usedCount() const {
+        return type == ConstraintType::Digit
+            ? digitConstraint.usedCount : operatorConstraint.usedCount;
+    }
 
     /**
      * @brief Access structural constraints (only relevant for symbols).
      *
      * <summary>
-     * Returns reference to `structure` in SymbolConstraint.
+     * Returns reference to `structure` in OperatorConstraint.
      * Used to inspect or update adjacency and formatting conflicts.
      * </summary>
      * @return Reference to StructuralConstraint
      */
-    StructuralConstraint& structure() { return symbol.structure; }
-    const StructuralConstraint& structure() const { return symbol.structure; }
+    StructuralConstraint& structure() {
+        return operatorConstraint.structure;
+    }
+    const StructuralConstraint& structure() const {
+        return operatorConstraint.structure;
+    }
 };
+
+void printConstraint(const std::unordered_map<char, Constraint>& constraintsMap);
+
+/**
+ * @brief Initializes an empty constraints map containing all symbols that may appear in expressions.
+ *
+ * @return An unordered_map<char, Constraint> with default-initialized constraints for all possible symbols.
+ *
+ * <summary>
+ * This function prepares the base constraint table used throughout the solving process.
+ * It ensures every potential symbol (digits, operators, etc.) has a Constraint entry
+ * ready for later updates by feedback (green/yellow/red).
+ * </summary>
+ */
+std::unordered_map<char, Constraint> initializeConstraintsMap();
 
 /**
  * @brief Derives per-character constraints based on previous guess-feedback pairs.
@@ -225,42 +289,18 @@ struct Constraint {
  * </summary>
  *
  * @param expressions Vector of guessed strings (e.g., ["12+34=46"])
- * @param colors Vector of corresponding feedback strings ('g' = green, 'y' = yellow, 'r' = red)
- * @param length Total length of the equation (for initializing bannedPos vector)
+ * @param expressionColors Vector of corresponding feedback strings ('g' = green, 'y' = yellow, 'r' = red)
+ * @param expLength Total length of the equation (for initializing bannedPos vector)
  * @return std::unordered_map<char, Constraint> Mapping from character to its derived Constraint
  */
 std::unordered_map<char, Constraint> deriveConstraints(
     const std::vector<std::string>& expressions,
-    const std::vector<std::string>& colors,
-    int length
+    const std::vector<std::string>& expressionColors,
+    int expLength
 );
 
-/**
- * @brief Checks whether a candidate equation satisfies a single guess-feedback pair.
- *
- * <summary>
- * This function simulates Wordle feedback checking:
- * - 'g' (green): character must be at this position
- * - 'y' (yellow): character must exist but not at this position
- * - 'r' (red): character cannot appear (or within allowed max count)
- * Returns true if candidate would generate the same feedback for the guess.
- * </summary>
- *
- * @param candidate Candidate string to test (e.g., "12+46=58")
- * @param expression The guess string (e.g., "12+35=47")
- * @param color Feedback string for the guess ('g', 'y', 'r')
- * @param allowedOps Set of allowed operator characters (e.g., '+', '-', '*', '/')
- * @return true if candidate satisfies the guess-feedback pair; false otherwise
- */
-bool matchesFeedback(
-    const std::string& candidate,
-    const std::string& expression,
-    const std::string& color,
-    const std::unordered_set<char>& allowedOps
-);
-
-void updateConstraint(
+bool updateConstraint(
     std::unordered_map<char, Constraint>& constraintsMap,
-    const std::string& expression,
-    const std::string& color
+    const std::string& exprLine,
+    const std::string& exprColorLine
 );

@@ -7,13 +7,14 @@
 // Version: v2.0
 /* ----- ----- ----- ----- */
 
+#include "CandidateGenerator.h"
 #include <cctype>
 #include <functional>
 #include <stdexcept>
 #include <unordered_map>
 
-#include "CandidateGenerator.h"
 #include "Constraint.h"
+#include "ConstraintUtils.h"
 #include "ExpressionValidator.h"
 #include "core/AppLogger.h"
 
@@ -26,21 +27,43 @@ using namespace std;
 CandidateGenerator::CandidateGenerator(ExpressionValidator& validator)
     : validator(validator) {}
 
-std::string tokenVecToString(const std::vector<Expr::Token>& tokens) {
-    std::string s;
-    for (auto& t : tokens) s += t.value;
-    return s;
+// =========================
+//  Internal Helper Section
+// =========================
+namespace {
+
+/**
+ * @brief Convert a list of tokens into a single concatenated expression string.
+ *
+ * @param tokensList A vector containing expression tokens.
+ * @return Concatenated string representing the full expression.
+ */
+std::string tokenVecToString(const std::vector<Expression::Token>& tokensList) {
+    std::string exprLine;
+    exprLine.reserve(tokensList.size() * 4);  // Preallocate capacity (assume average token length ≈ 4)
+
+    for (const auto& token : tokensList) {
+        exprLine.append(token.value);
+    }
+
+    return exprLine;
 }
 
-bool CandidateGenerator::isRhsLengthFeasible(
-    int lhsLen,
-    int rhsLen,
-    const std::unordered_set<char>& operators
-) const {
-    if (lhsLen <= 0 || rhsLen <= 0) return false;
+} // namespace (end of internal helpers)
 
-    // m = 數字塊數量 (numbers)，最多為 floor((lhsLen + 1) / 2)
-    int m_max = (lhsLen + 1) / 2;
+// =========================
+//  Public Functions Section
+// =========================
+
+bool CandidateGenerator::isRhsLengthFeasible(
+    int lhsLength,
+    int rhsLength,
+    const std::unordered_set<char>& operatorsSet
+) const {
+    if (lhsLength <= 0 || rhsLength <= 0) return false;
+
+    // m = 數字塊數量 (numbers)，最多為 floor((lhsLength + 1) / 2)
+    int m_max = (lhsLength + 1) / 2;
     long double bestLog = -INFINITY; // 最佳（最大）log10(value) 的上界
 
     // 工具 lambda：log10(10^len - 1) 精準近似
@@ -54,7 +77,7 @@ bool CandidateGenerator::isRhsLengthFeasible(
 
     // 遍歷可能的 number 個數 m
     for (int m = 1; m <= m_max; ++m) {
-        int sumDigits = lhsLen - (m - 1); // 數字總位數（因為 m-1 個運算符各佔 1 字元）
+        int sumDigits = lhsLength - (m - 1); // 數字總位數（因為 m-1 個運算符各佔 1 字元）
         if (sumDigits < m) continue; // 不可能（每個數字至少 1 位）
 
         // 使用遞迴產生把 sumDigits 分成 m 個正整數 (composition)
@@ -74,14 +97,14 @@ bool CandidateGenerator::isRhsLengthFeasible(
                 }
 
                 // 1) 若有乘法 (*)，上界可以用 product 的 log (sum of logs)
-                if (operators.count('*')) {
+                if (operatorsSet.count('*')) {
                     long double prodLog = 0.0L;
                     for (int i = 0; i < m; ++i) prodLog += logs[i];
                     if (prodLog > bestLog) bestLog = prodLog;
                 }
 
                 // 2) 若有加法/減法 (+ or -)，上界可估為 log10(m * 10^maxLen)
-                if (operators.count('+') || operators.count('-')) {
+                if (operatorsSet.count('+') || operatorsSet.count('-')) {
                     // sum <= m * (10^maxLen - 1) < m * 10^maxLen
                     long double addLog = (long double)maxLen + log10l((long double)m);
                     if (addLog > bestLog) bestLog = addLog;
@@ -89,7 +112,7 @@ bool CandidateGenerator::isRhsLengthFeasible(
 
                 // 3) 若有冪 (^)，用 a^E 的上界估計：
                 //    選擇最大的 base_len 與最大的 exponent_len（保守上界，不要求相鄰）
-                if (operators.count('^')) {
+                if (operatorsSet.count('^')) {
                     int base_len = 0;
                     int exp_len  = 0;
                     for (int x : parts) {
@@ -148,43 +171,43 @@ bool CandidateGenerator::isRhsLengthFeasible(
     long double eps = 1e-12L;
     long long maxDigits = (long long)floor(bestLog + eps) + 1LL;
 
-    return maxDigits >= rhsLen;
+    return maxDigits >= rhsLength;
 }
 
 void CandidateGenerator::_dfsGenerateLeftTokens(
-    int lhsLen,
-    const std::unordered_set<char>& operators,
-    std::vector<Expr::Token>& current,
-    std::vector<std::vector<Expr::Token>>& lhsCandidates,
+    int lhsLength,
+    const std::unordered_set<char>& operatorsSet,
+    std::vector<Expression::Token>& currentTokens,
+    std::vector<std::vector<Expression::Token>>& lhsCandidatesList,
     std::unordered_map<char, Constraint>& lhsConstraintsMap,
-    const std::vector<char>& requiredAtPos,
-    int depth
+    const std::vector<char>& requiredCharsAtPos,
+    int dfsDepth
 ) {
     // Log for each depth
     /*{
-        std::string ops;
-        for (char o : operators) ops.push_back(o), ops.push_back(' ');
-        AppLogger::Trace(fmt::format("[_dfs, depth={}] lhsLen={}, operators=[{}]", depth, lhsLen, ops));
+        std::string operatorStr;
+        for (char o : operatorsSet) operatorStr.push_back(o), operatorStr.push_back(' ');
+        AppLogger::Trace(fmt::format("[_dfs, depth={}] lhsLength={}, operators=[{}]", dfsDepth, lhsLength, operatorStr));
     }*/
 
     // Count used length
     int usedLength = 0;
-    for (const auto& t : current)
+    for (const auto& t : currentTokens)
         usedLength += static_cast<int>(t.value.size());
     // Not enough length, finish recursion
-    if (usedLength >= lhsLen) {
+    if (usedLength >= lhsLength) {
         // Only token size >= 3 makes sence, e.g. "12 + 34", "9 * 3"
         // Expression must end with digit token
-        if (!current.empty() &&
-            current.size() >= 3 &&
-            current.back().type == Expr::TokenType::Digit) {
-            lhsCandidates.push_back(current);
+        if (!currentTokens.empty() &&
+            currentTokens.size() >= 3 &&
+            currentTokens.back().type == Expression::TokenType::Digit) {
+            lhsCandidatesList.push_back(currentTokens);
         }
         return;
     }
 
-    // Calculate if remain required charactor can filled in, if not, than prune
-    int remainingLength = lhsLen - usedLength;
+    // Calculate if remain required character can filled in, if not, than prune
+    int remainingLength = lhsLength - usedLength;
     int totalMinRequired = 0;
     for (const auto& [ch, con] : lhsConstraintsMap) {
         int remaining = con.minCount() - con.usedCount();
@@ -196,142 +219,34 @@ void CandidateGenerator::_dfsGenerateLeftTokens(
         return;
     }
 
-    // Charactor-level check
-    auto isCharAllowed = [&](char ch) -> bool {
-        auto it = lhsConstraintsMap.find(ch);
-
-        // Error handling, should not happened
-        if (it == lhsConstraintsMap.end()) {
-            //AppLogger::Trace(fmt::format("[_dfs, now='{}'] Try {}, passed: not exist in constraints map", tokenVecToString(current), ch));
-            return false;
-        }
-
-        const Constraint& con = it->second;
-
-        // Only got 'r' color, not contained in answer
-        if (con.minCount() == 0 && con.maxCount() == 0) {
-            //AppLogger::Trace(fmt::format("[_dfs, now='{}'] Try {}, skipped: forbidden (min=max=0)", tokenVecToString(current), ch));
-            return false;
-        }
-
-        // Got some 'g'/'y', and has 'r' to restrict the max use
-        if (con.usedCount() >= con.maxCount()) {
-            //AppLogger::Trace(fmt::format("[_dfs, now='{}'] Try {}, skipped: Reach max usage limit {}", tokenVecToString(current), ch, con.maxCount()));
-            return false;
-        }
-
-        return true;
-    };
-
-    // Position-level check
-    auto isCharAllowedAtPos = [&](char ch, int pos) -> bool {
-        auto it = lhsConstraintsMap.find(ch);
-
-        // The charactor got 'y' or 'r' at this position, means not allowed here
-        if (it != lhsConstraintsMap.end()) {
-            const Constraint& con = it->second;
-            if (con.bannedPos().count(pos)) {
-                //AppLogger::Trace(fmt::format("[_dfs, now='{}'] Try {}, skipped: Disallowed at pos {}", tokenVecToString(current), ch, pos));
-                return false;
-            }
-        }
-
-        return true;
-    };
-
-    // Token-level check
-    auto isTokenValid = [&](const Expr::Token& token) -> bool {
-        if (token.type == Expr::TokenType::Digit) {
-            const std::string& v = token.value;
-
-            // Error handling: Token couldn't be empty (shouldn't be here)
-            if (v.empty()) {
-                return false;
-            }
-
-            // Digit token should not be "0", or start with '0' 
-            if (v[0] == '0') {
-                return false;
-            }
-
-            // Check if all digits (shouldn't be here)
-            for (char c : v) {
-                if (!std::isdigit(static_cast<unsigned char>(c)))
-                    return false;
-            }
-
-            return true;
-        }
-        // No check for operator so far
-        // Single charactor checking already done in isCharAllowed() and isCharAllowedAtPos()
-
-        return true;
-    };
-
-    // Token-level check
-    auto isTokenSequenceValid = [&](const std::vector<Expr::Token>& tokens) -> bool {
-        if (tokens.empty()) return false;
-
-        const Expr::Token& last = tokens.back();         ///< Last token
-        const Expr::Token* prev = tokens.size() >= 2 ?   ///< Previous token
-            &tokens[tokens.size() - 2] : nullptr;
-        const Expr::Token* prev2 = tokens.size() >= 3 ?  ///< Previous' previous token
-            &tokens[tokens.size() - 3] : nullptr;
-
-        // Operator cannot be first charactor
-        if (tokens.size() == 1 && last.type == Expr::TokenType::Operator)
-            return false;
-        
-        // Operator logic check
-        if (last.type == Expr::TokenType::Operator) {
-
-            // Operator follow another operator is not allowed
-            if (prev && prev->type == Expr::TokenType::Operator) {
-                return false;
-            }
-
-            // Consecutive factorials are not allowed
-            if (prev2 && prev2->value == "^" && last.value == "^") {
-                return false;
-            }
-        }
-        // Digit logic check
-        else {
-            // '0' cannot follow '/'
-            if (!tokens.empty() && tokens.back().value == "/" && last.value == "0") {
-                return false;
-            }
-        }
-
-        return true;
-    };
-
     // Main logic for operators and digits
-    int pos = usedLength;  ///< Same value as used-length, but represent the position
-    auto tryAppendToken = [&](char ch) {
-        // Charactor-level and position-level check
-        if (!isCharAllowed(ch)) return;           // Check if the charactor should be passed
-        if (!isCharAllowedAtPos(ch, pos)) return; // Check if the position can fill in this charactor
+    int currentPosition = usedLength;  ///< Same value as used-length, but represent the position
+    auto tryAppendToken = [&](char exprChar) {
+        // character-level and position-level check
+        if (!ConstraintUtils::isCharAllowed(exprChar, lhsConstraintsMap))
+            return;  // Check if the character should be passed
+        if (!ConstraintUtils::isCharAllowedAtPos(exprChar, currentPosition, lhsConstraintsMap))
+            return;  // Check if the position can fill in this character
 
         // Auto determin token type
-        Expr::TokenType type =
-            (std::isdigit(static_cast<unsigned char>(ch)))
-                ? Expr::TokenType::Digit
-                : Expr::TokenType::Operator;
+        Expression::TokenType tokenType =
+            (std::isdigit(static_cast<unsigned char>(exprChar)))
+                ? Expression::TokenType::Digit
+                : Expression::TokenType::Operator;
 
         // Try to get last token
-        Expr::Token* last = current.empty() ? nullptr : &current.back();
+        Expression::Token* lastToken = currentTokens.empty() ? nullptr : &currentTokens.back();
 
         // Merge check (If prev == digit && this == digit)
         bool isMerged = false;
-        Expr::Token newToken{type, std::string(1, ch)};
+        Expression::Token newToken{tokenType, std::string(1, exprChar)};
         // Previous token == digit && this token == digit => Merge
-        if (last && last->type == Expr::TokenType::Digit && type == Expr::TokenType::Digit) {
+        if (lastToken && lastToken->type == Expression::TokenType::Digit && tokenType == Expression::TokenType::Digit) {
             // Digit start with '0' is not allowed
-            if (last->value.size() == 1 && last->value[0] == '0') {
+            if (lastToken->value.size() == 1 && lastToken->value[0] == '0') {
                 return;
             }
-            last->value.push_back(ch);
+            lastToken->value.push_back(exprChar);
             isMerged = true;
         }
         // Cannot merge, generate new token
@@ -341,8 +256,8 @@ void CandidateGenerator::_dfsGenerateLeftTokens(
 
         // Finalize previous token (when type changes or token ends)
         // Only when NOT merged (e.g., operator after digit, digit after operator)
-        if (!isMerged && last) {
-            if (!isTokenValid(*last)) {
+        if (!isMerged && lastToken) {
+            if (!ConstraintUtils::isTokenValid(*lastToken)) {
                 // Previous token invalid => rollback (don't proceed)
                 return;
             }
@@ -350,48 +265,53 @@ void CandidateGenerator::_dfsGenerateLeftTokens(
 
         // Push
         if (!isMerged) {
-            current.push_back({type, std::string(1, ch)});
+            currentTokens.push_back({tokenType, std::string(1, exprChar)});
         } else {
             // Already merged, nothing to do
         }
 
         // After merge or adding new token, validate current sequence
-        if (!isTokenSequenceValid(current)) {
+        if (!ConstraintUtils::isTokenSequenceValid(currentTokens)) {
             // Rollback merge if invalid
             if (isMerged)
-                last->value.pop_back();
+                lastToken->value.pop_back();
             else
-                current.pop_back();
+                currentTokens.pop_back();
             return;
         }
 
-        //AppLogger::Trace(fmt::format("[_dfs, now='{}'] Try {}, accepted", tokenVecToString(current), ch));
-        if (lhsConstraintsMap.count(ch)) lhsConstraintsMap[ch].usedCount()++;
+        //AppLogger::Trace(fmt::format("[_dfs, now='{}'] Try {}, accepted", tokenVecToString(currentTokens), ch));
+        if (lhsConstraintsMap.count(exprChar))
+            lhsConstraintsMap[exprChar].usedCount()++;
 
         // Recursion
-        _dfsGenerateLeftTokens(lhsLen, operators, current, lhsCandidates,
-                            lhsConstraintsMap, requiredAtPos, depth + 1);
+        _dfsGenerateLeftTokens(lhsLength, operatorsSet, currentTokens, lhsCandidatesList,
+            lhsConstraintsMap, requiredCharsAtPos, dfsDepth + 1);
 
         // Backtracking
-        if (lhsConstraintsMap.count(ch)) lhsConstraintsMap[ch].usedCount()--;
+        if (lhsConstraintsMap.count(exprChar))
+            lhsConstraintsMap[exprChar].usedCount()--;
+
         if (isMerged) {
-            last->value.pop_back();;
+            lastToken->value.pop_back();;
         } else {
-            current.pop_back();
+            currentTokens.pop_back();
         }
     };
 
-    // Check if there's green position (only fill in specific charactor)
-    if (pos < (int)requiredAtPos.size() && requiredAtPos[pos] != 0) {
-        char fixedChar = requiredAtPos[pos];  ///< The charactor already known green here
-        //AppLogger::Trace(fmt::format("[_dfs, now='{}'] Fixed {}, accepted due to green pos", tokenVecToString(current), fixedChar));
-        Expr::TokenType type =
-            (operators.count(fixedChar) ? Expr::TokenType::Operator : Expr::TokenType::Digit);
-        tryAppendToken(fixedChar);
+    // Check if there's green position (only fill in specific character)
+    if (currentPosition < static_cast<int>(requiredCharsAtPos.size()) &&
+        requiredCharsAtPos[currentPosition] != 0)
+    {
+        char greenPosChar = requiredCharsAtPos[currentPosition];  ///< The character already known green here
+        /*AppLogger::Trace(fmt::format("[_dfs, now='{}'] Fixed {}, accepted due to green pos",
+            tokenVecToString(currentTokens), greenPosChar));*/
+        tryAppendToken(greenPosChar);
     } else {
-        //AppLogger::Trace(fmt::format("[_dfs, now='{}'] No Fixed symbol, start trying 0-9 and ops...", tokenVecToString(current)));
+        /*AppLogger::Trace(fmt::format("[_dfs, now='{}'] No Fixed symbol, start trying 0-9 and ops...",
+            tokenVecToString(currentTokens)));*/
         // Try operators
-        for (char op : operators)
+        for (char op : operatorsSet)
             tryAppendToken(op);
 
         // Try digits
@@ -401,73 +321,53 @@ void CandidateGenerator::_dfsGenerateLeftTokens(
 }
 
 void CandidateGenerator::generateLeftTokens(
-    int lhsLen,
-    const std::unordered_set<char>& operators,
-    std::vector<Expr::Token> current,
-    std::vector<std::vector<Expr::Token>>& lhsCandidates,
+    int lhsLength,
+    const std::unordered_set<char>& operatorsSet,
+    std::vector<Expression::Token> currentTokens,
+    std::vector<std::vector<Expression::Token>>& lhsCandidatesList,
     std::unordered_map<char, Constraint>& lhsConstraintsMap,
-    int depth
+    int dfsDepth
 ) {
     // Create requiredAtPos (only 1 time)
-    std::vector<char> requiredAtPos(lhsLen, 0);
+    std::vector<char> requiredAtPosList(lhsLength, 0);
     for (const auto& [ch, con] : lhsConstraintsMap) {
         for (int gp : con.greenPos()) {
-            if (gp >= 0 && gp < lhsLen) {
-                if (requiredAtPos[gp] != 0 && requiredAtPos[gp] != ch) {
+            if (gp >= 0 && gp < lhsLength) {
+                if (requiredAtPosList[gp] != 0 && requiredAtPosList[gp] != ch) {
                     AppLogger::Warn(fmt::format("[Constraint] conflict at pos {}: '{}' vs '{}'",
-                        gp, requiredAtPos[gp], ch));
+                        gp, requiredAtPosList[gp], ch));
                 }
-                requiredAtPos[gp] = ch;
+                requiredAtPosList[gp] = ch;
             }
         }
     }
 
-    // Logging for requiredAtPos
+    // Logging for requiredAtPosList
     /*{
         std::string repr;
-        for (int i = 0; i < (int)requiredAtPos.size(); ++i) {
-            char c = requiredAtPos[i];
+        for (int i = 0; i < (int)requiredAtPosList.size(); ++i) {
+            char c = requiredAtPosList[i];
             if (c == 0)
                 repr += '_';   // '_' indicated empty space (not be fixed)
             else
                 repr += c;
         }
-        AppLogger::Trace(fmt::format("[Constraint] requiredAtPos = {}", repr));
+        AppLogger::Trace(fmt::format("[Constraint] requiredAtPosList = {}", repr));
     }*/
 
     // DFS to generate tokens
-    _dfsGenerateLeftTokens(lhsLen, operators, current, lhsCandidates,
-                           lhsConstraintsMap, requiredAtPos, depth);
-}
-
-bool CandidateGenerator::isCandidateValid(
-    const std::string& expr,
-    const std::unordered_map<char, Constraint>& constraints
-) {
-    // Count every charactor occurrences in expression
-    std::unordered_map<char, int> countMap;
-    for (char c : expr) {
-        countMap[c]++;
-    }
-
-    // Compare with constraint
-    for (const auto& [ch, con] : constraints) {
-        int cnt = countMap[ch];  // Default to 0 if not exist
-        if (cnt < con.minCount() || cnt > con.maxCount()) {
-            return false;
-        }
-    }
-
-    return true;
+    _dfsGenerateLeftTokens(lhsLength, operatorsSet, currentTokens, lhsCandidatesList,
+        lhsConstraintsMap, requiredAtPosList, dfsDepth);
 }
 
 std::vector<string> CandidateGenerator::generate(
-    int length,
-    const std::unordered_set<char>& operators,
+    int expLength,
+    const std::unordered_set<char>& operatorsSet,
     const std::vector<string>& expressions,
-    const std::vector<string>& colors
+    const std::vector<string>& expressionColors,
+    std::unordered_map<char, Constraint>& constraintsMap
 ) {
-    std::vector<string> finalCandidates;  ///< Record possible answer(s)
+    std::vector<string> finalCandidatesList;  ///< Record possible answer(s)
 
     auto formatResult = [&](double val, bool isInt) -> std::string {
         if (isInt) {
@@ -477,163 +377,137 @@ std::vector<string> CandidateGenerator::generate(
         }
     };
 
-    auto tryCandidate = [&](const std::vector<Expr::Token>& lhsTokens,
-        int eqPos,
-        int lhsLen,
-        int rhsLen,
-        std::unordered_map<char, Constraint> constraints
+    auto tryCandidate = [&](
+        const std::vector<Expression::Token>& lhsTokensList,
+        int eqSignPosition,
+        int lhsLength,
+        int rhsLength,
+        std::unordered_map<char, Constraint> constraintsMap
     ) {
-        std::string lhsString = tokenVecToString(lhsTokens);
-        //AppLogger::Trace(fmt::format("[Try eval] LHS='{}' (eqPos={}, lhsLen={})", lhsString, eqPos, lhsLen));
+        std::string lhsString = tokenVecToString(lhsTokensList);
+        /*AppLogger::Trace(fmt::format("[Try eval] LHS='{}' (eqPos={}, lhsLength={})",
+            lhsString, eqSignPosition, lhsLength));*/
 
         // Try to evaluate lhs
         double lhsResult;
         try {
             lhsResult = validator.evalExpr(lhsString);
         } catch (const std::exception& e) {
-            AppLogger::Trace(fmt::format("[Eval Fail] {} : {}", lhsString, e.what()));
+            //AppLogger::Trace(fmt::format("[Eval Fail] {} : {}", lhsString, e.what()));
             return;
         } catch (...) {
-            AppLogger::Trace(fmt::format("[Eval Fail] {} : unknown error", lhsString));
+            //AppLogger::Trace(fmt::format("[Eval Fail] {} : Unknown error", lhsString));
             return;
         }
 
         // The answer must be integer
-        bool isInt = validator.isInteger(lhsResult);
-        std::string rhsString = formatResult(lhsResult, isInt);
-        if (!isInt) {
-            AppLogger::Trace(fmt::format("[rhs] Reject non-integer rhs {} => {}", lhsString, rhsString));
+        bool islhsResultInt = validator.isInteger(lhsResult);
+        std::string rhsString = formatResult(lhsResult, islhsResultInt);
+        if (!islhsResultInt) {
+            //AppLogger::Trace(fmt::format("[rhs] Reject non-integer rhs {} => {}", lhsString, rhsString));
             return;
         }
         // The answer never be negative
         if (lhsResult < 0) {
-            AppLogger::Trace(fmt::format("[rhs] Reject negative rhs {} => {}", lhsString, rhsString));
+            //AppLogger::Trace(fmt::format("[rhs] Reject negative rhs {} => {}", lhsString, rhsString));
             return;
         }
-        // Check if rhs length match rhsLen
+        // Check if rhs length match rhsLength
         int rhsSize = rhsString.size();
-        if (rhsSize != rhsLen) {
-            AppLogger::Trace(fmt::format("[rhs] {} = {} -> rhs length mismatch ({} != {})", lhsString, rhsString, rhsSize, rhsLen));
+        if (rhsSize != rhsLength) {
+            //AppLogger::Trace(fmt::format("[rhs] {} = {} -> rhs length mismatch ({} != {})", lhsString, rhsString, rhsSize, rhsLength));
             return;
         }
         // Check if "lhs + '=' + rhs" match constraint min/max
-        std::string candidate = lhsString + '=' + rhsString;
-        if(!isCandidateValid(candidate, constraints)) {
-            AppLogger::Trace(fmt::format("[rhs] Reject mismatch min/max exp {} = {}", lhsString, rhsString));
+        std::string candidateExprLine = lhsString + '=' + rhsString;
+        if(!ConstraintUtils::isCandidateValid(candidateExprLine, constraintsMap)) {
+            //AppLogger::Trace(fmt::format("[rhs] Reject mismatch min/max exp {} = {}", lhsString, rhsString));
             return;
         }
 
-        AppLogger::Debug(fmt::format("[rhs] Accept rhs: {} = {}", lhsString, rhsString));
-        finalCandidates.push_back(candidate);
+        //AppLogger::Trace(fmt::format("[rhs] Accept rhs: {} = {}", lhsString, rhsString));
+        finalCandidatesList.push_back(candidateExprLine);
     };
 
     // Build constraints
-    std::unordered_map<char, Constraint> constraintsMap = deriveConstraints(expressions, colors, length);
+    constraintsMap = deriveConstraints(expressions, expressionColors, expLength);
 
     // Log for constraints
-    {
-        AppLogger::Debug("===== Derived Constraints =====");
-        for (auto& kv : constraintsMap) {
-            const auto& symbol = kv.first;
-            const auto& cst    = kv.second;
-
-            std::string greenStr;
-            for (int pos : cst.greenPos()) greenStr += std::to_string(pos) + " ";
-
-            std::string bannedStr;
-            for (int pos : cst.bannedPos()) bannedStr += std::to_string(pos) + " ";
-
-            AppLogger::Debug(fmt::format(
-                "  Symbol: {} | MinCount: {} | MaxCount: {} | GreenPos: {{{}}} | BannedPos: {{{}}} | Conflict: {}",
-                symbol,
-                cst.minCount(),
-                cst.maxCount(),
-                greenStr,
-                bannedStr,
-                cst.hasConflict() ? "YES" : "NO"
-            ));
-        }
-    }
+    printConstraint(constraintsMap);
 
     // Build forbidden set (never shows up in the answer) from constraints, for more clearly meaning
-    std::unordered_set<char> forbidden;
+    std::unordered_set<char> forbiddenSet;
     for (auto& [ch, con] : constraintsMap) {
         if (con.minCount() == 0 && con.maxCount() == 0) {
-            forbidden.insert(ch);
-            AppLogger::Debug(fmt::format("[Constraint] Symbol '{}' is forbidden (min=max=0)", ch));
+            forbiddenSet.insert(ch);
+            //AppLogger::Trace(fmt::format("[Constraint] Symbol '{}' is forbidden (min=max=0)", ch));
         }
     }
 
     // Try to search '=' fixed location
-    auto it = constraintsMap.find('=');
+    auto constraintsIt = constraintsMap.find('=');
     // Error handling
-    if (it == constraintsMap.end()) {
+    if (constraintsIt == constraintsMap.end()) {
         throw std::runtime_error("Data error: Missing '=' constraint.");
     }
 
-    const Constraint& eqConstraint = it->second;
+    const Constraint& eqSignConstraint = constraintsIt->second;
 
-    if (eqConstraint.hasConflict()) {
+    if (eqSignConstraint.hasConflict()) {
         // '=' conflict error should be handled in deriveConstraints() function
     }
 
-    std::vector<int> eqPositions;  ///< locations '=' might locate at
+    std::vector<int> eqSignPositionsList;  ///< locations '=' might locate at
 
     // Check if '=' has fixed location
-    if (!eqConstraint.greenPos().empty()) {  // Green position not empty => Has fixed location
-        for (int pos : eqConstraint.greenPos()) {
-            AppLogger::Debug(fmt::format("[eqPos] '=' has fixed green position at {}", pos));
-            eqPositions.push_back(pos);
+    if (!eqSignConstraint.greenPos().empty()) {  // Green position not empty => Has fixed location
+        for (int pos : eqSignConstraint.greenPos()) {
+            //AppLogger::Trace(fmt::format("[eqPos] '=' has fixed green position at {}", pos));
+            eqSignPositionsList.push_back(pos);
         }
     } else {                                 // Empty => Try every possible location
-        AppLogger::Debug(fmt::format("[eqPos] eqPos does not has fixed position, will traverse it"));
-        for (int eqPos = length - 2; eqPos >= 3; --eqPos) {
-            eqPositions.push_back(eqPos);
+        //AppLogger::Trace(fmt::format("[eqPos] eqPos does not has fixed position, will traverse it"));
+        for (int eqPos = expLength - 2; eqPos >= 3; --eqPos) {
+            eqSignPositionsList.push_back(eqPos);
         }
     }
 
     // Try to generate lhs, sort by '=' positions
-    for (int eqPos : eqPositions) {
-        int lhsLen = eqPos;
-        int rhsLen = length - eqPos - 1;
+    for (int eqPos : eqSignPositionsList) {
+        int lhsLength = eqPos;
+        int rhsLength = expLength - eqPos - 1;
 
-        AppLogger::Debug("===== ===== ===== ===== ===== =====");
         AppLogger::Debug(fmt::format("===== Processing left tokens for length {} =====", eqPos));
-        AppLogger::Debug("===== ===== ===== ===== ===== =====");
 
         // Skip impossible rhs by length feasibility
-        if (!isRhsLengthFeasible(lhsLen, rhsLen, operators)) {
-            AppLogger::Debug(fmt::format("[Skip eqPos={}] unrealistic rhsLen {}", eqPos, rhsLen));
+        if (!isRhsLengthFeasible(lhsLength, rhsLength, operatorsSet)) {
+            AppLogger::Debug(fmt::format("[Skip eqPos={}] unrealistic rhsLength {}", eqPos, rhsLength));
             continue;
         }
 
-        std::vector<Expr::Token> tempLhsTokenVector;
-        std::vector<std::vector<Expr::Token>> lhsCandidates;
-        vector<std::unordered_set<char>> lhsAllowed(lhsLen);
+        std::vector<Expression::Token> tempLhsTokenList;
+        std::vector<std::vector<Expression::Token>> lhsCandidatesList;
+        vector<std::unordered_set<char>> lhsAllowed(lhsLength);
 
         std::unordered_map<char, Constraint> lhsConstraintsMap = constraintsMap;
 
         // Adjust minCount, considering available space on the RHS
         for (auto& [ch, con] : lhsConstraintsMap) {
-            int rhsAvailable = rhsLen;
+            int rhsAvailable = rhsLength;
             // Assume that each symbol can be filled with at most RHS space
             con.minCount() = (std::max)(0, con.minCount() - rhsAvailable);
         }
 
-        AppLogger::Debug("===== ===== ===== ===== ===== =====");
         AppLogger::Debug("===== Start to generate left tokens =====");
-        AppLogger::Debug("===== ===== ===== ===== ===== =====");
         // call generator with forbidden and minReq and counts
-        generateLeftTokens(lhsLen, operators, tempLhsTokenVector, lhsCandidates, lhsConstraintsMap, 0);
+        generateLeftTokens(lhsLength, operatorsSet, tempLhsTokenList, lhsCandidatesList, lhsConstraintsMap, 0);
 
-        AppLogger::Debug("===== ===== ===== ===== ===== =====");
         AppLogger::Debug("===== Start to eval left tokens =====");
-        AppLogger::Debug("===== ===== ===== ===== ===== =====");
         // rest as before: eval each lhs, skip negatives, check rhs length and feedback
-        for (auto& lhs : lhsCandidates) {
-            tryCandidate(lhs, eqPos, lhsLen, rhsLen, constraintsMap);
+        for (auto& lhs : lhsCandidatesList) {
+            tryCandidate(lhs, eqPos, lhsLength, rhsLength, constraintsMap);
         }
     } // for eqPos
 
-    return finalCandidates;
+    return finalCandidatesList;
 }
