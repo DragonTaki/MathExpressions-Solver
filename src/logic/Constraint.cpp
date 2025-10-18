@@ -15,8 +15,8 @@
 #include <stdexcept>
 #include <unordered_set>
 
-#include "core/AppLogger.h"
 #include "core/constants/ExpressionConstants.h"
+#include "core/logging/AppLogger.h"
 
 #define FMT_HEADER_ONLY
 #include "core.h"

@@ -12,9 +12,9 @@
 #include <cctype>
 #include <unordered_set>
 
-#include "core/AppLogger.h"
 #include "core/constants/ExpressionConstants.h"
 #include "core/constants/ExpressionTokens.h"
+#include "core/logging/AppLogger.h"
 
 namespace ConstraintUtils {
 
@@ -135,6 +135,32 @@ bool isTokenSequenceValid(const std::vector<Expression::Token>& tokensList) {
     return true;
 }
 
+/**
+ * @brief Check if the current position conflicts with any green positions of other characters.
+ * 
+ * @param exprChar The character at the current position.
+ * @param position The current index in the expression.
+ * @param constraintsMap Map of character constraints.
+ * @return true if no green-position conflict, false if some other character must occupy this position.
+ */
+bool isCharSafeAtPosition(
+    char exprChar,
+    int position,
+    const std::unordered_map<char, Constraint>& constraintsMap)
+{
+    for (const auto& [otherChar, constraint] : constraintsMap) {
+        if (otherChar == exprChar) continue;
+
+        const auto& greenPositions = constraint.greenPos();
+        if (greenPositions.count(position) > 0) {
+            // 這個位置已被其他字元綠色固定，當前字元不可用
+            return false;
+        }
+    }
+
+    return true;
+}
+
 // ---------------- Candidate Check ----------------
 bool isCandidateValid(
     const std::string& exprLine,
@@ -151,6 +177,11 @@ bool isCandidateValid(
 
         // If allowed at the position
         if (!isCharAllowedAtPos(exprChar, static_cast<int>(exprCharPosition), constraintsMap)) {
+            return false;
+        }
+
+        // If no other symbol occupied the position
+        if (!isCharSafeAtPosition(exprChar, exprCharPosition, constraintsMap)) {
             return false;
         }
     }

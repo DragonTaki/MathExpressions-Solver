@@ -74,7 +74,7 @@ public:
      * This static method catches all exceptions from `evalExpr` and prevents
      * runtime crashes from invalid or malformed expressions.
      */
-    static std::optional<double> safeEval(const std::string& exprLine);
+    std::optional<double> safeEval(const std::string& exprLine);
 
     /**
      * @brief Validates a mathematical expression of a given length.

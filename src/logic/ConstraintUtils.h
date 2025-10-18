@@ -16,7 +16,6 @@
 
 namespace ConstraintUtils {
 
-
 /**
  * @brief Checks whether a character is globally allowed under the given constraint map.
  * @param exprChar The character being checked.
@@ -60,4 +59,3 @@ bool isCandidateValid(
 );
 
 } // namespace (end of ConstraintUtils)
-

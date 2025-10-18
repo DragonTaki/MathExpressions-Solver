@@ -16,13 +16,12 @@
 #include "Constraint.h"
 #include "ConstraintUtils.h"
 #include "ExpressionValidator.h"
-#include "core/AppLogger.h"
+#include "core/constants/ExpressionConstants.h"
+#include "core/logging/AppLogger.h"
 
 #define FMT_HEADER_ONLY
 #include "core.h"
 #include "ranges.h"
-
-using namespace std;
 
 CandidateGenerator::CandidateGenerator(ExpressionValidator& validator)
     : validator(validator) {}
@@ -298,12 +297,11 @@ void CandidateGenerator::_dfsGenerateLeftTokens(
             currentTokens.pop_back();
         }
     };
-
     // Check if there's green position (only fill in specific character)
-    if (currentPosition < static_cast<int>(requiredCharsAtPos.size()) &&
-        requiredCharsAtPos[currentPosition] != 0)
+    if (currentPosition < static_cast<int>(requiredCharsAtPos.size())
+        && requiredCharsAtPos[currentPosition] != 0)
     {
-        char greenPosChar = requiredCharsAtPos[currentPosition];  ///< The character already known green here
+        char greenPosChar = requiredCharsAtPos[currentPosition]; ///< The character already known green here
         /*AppLogger::Trace(fmt::format("[_dfs, now='{}'] Fixed {}, accepted due to green pos",
             tokenVecToString(currentTokens), greenPosChar));*/
         tryAppendToken(greenPosChar);
@@ -311,12 +309,12 @@ void CandidateGenerator::_dfsGenerateLeftTokens(
         /*AppLogger::Trace(fmt::format("[_dfs, now='{}'] No Fixed symbol, start trying 0-9 and ops...",
             tokenVecToString(currentTokens)));*/
         // Try operators
-        for (char op : operatorsSet)
-            tryAppendToken(op);
+        for (char c : operatorsSet)
+            tryAppendToken(c);
 
         // Try digits
-        for (char ch = '0'; ch <= '9'; ++ch)
-            tryAppendToken(ch);
+        for (char d : Expression::DIGIT_SYMBOLS)
+            tryAppendToken(d);
     }
 }
 
@@ -360,14 +358,14 @@ void CandidateGenerator::generateLeftTokens(
         lhsConstraintsMap, requiredAtPosList, dfsDepth);
 }
 
-std::vector<string> CandidateGenerator::generate(
+std::vector<std::string> CandidateGenerator::generate(
     int expLength,
     const std::unordered_set<char>& operatorsSet,
-    const std::vector<string>& expressions,
-    const std::vector<string>& expressionColors,
+    const std::vector<std::string>& expressions,
+    const std::vector<std::string>& expressionColors,
     std::unordered_map<char, Constraint>& constraintsMap
 ) {
-    std::vector<string> finalCandidatesList;  ///< Record possible answer(s)
+    std::vector<std::string> finalCandidatesList;  ///< Record possible answer(s)
 
     auto formatResult = [&](double val, bool isInt) -> std::string {
         if (isInt) {
@@ -487,7 +485,7 @@ std::vector<string> CandidateGenerator::generate(
 
         std::vector<Expression::Token> tempLhsTokenList;
         std::vector<std::vector<Expression::Token>> lhsCandidatesList;
-        vector<std::unordered_set<char>> lhsAllowed(lhsLength);
+        std::vector<std::unordered_set<char>> lhsAllowed(lhsLength);
 
         std::unordered_map<char, Constraint> lhsConstraintsMap = constraintsMap;
 

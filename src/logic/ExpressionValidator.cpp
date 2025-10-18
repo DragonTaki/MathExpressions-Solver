@@ -9,6 +9,7 @@
 
 #include "ExpressionValidator.h"
 #include <algorithm>
+#include <iostream>
 #include <optional>
 #include <stack>
 #include <stdexcept>
@@ -21,65 +22,67 @@
 #include "ConstraintUtils.h"
 
 namespace {
-    /**
-     * @brief Get operator precedence.
-     *
-     * <summary>
-     * Defines standard arithmetic operator precedence:
-     * '^' > '*' '/' > '+' '-'.
-     * </summary>
-     *
-     * @param op Operator character ('+', '-', '*', '/', '^')
-     * @return int Precedence level (higher = higher priority)
-     */
-    int precedence(char op) {
-        if (op == '^') return 3;
-        if (op == '*' || op == '/') return 2;
-        if (op == '+' || op == '-') return 1;
-        return 0;
-    }
 
-    /**
-     * @brief Checks whether an operator is left-associative.
-     *
-     * <summary>
-     * In this evaluator, all operators are left-associative
-     * except for '^' which is right-associative.
-     * </summary>
-     *
-     * @param op Operator character
-     * @return true if left-associative; false if right-associative
-     */
-    bool isLeftAssociative(char op) {
-        return (op != '^'); // '^' is right-associative
-    }
+/**
+ * @brief Get operator precedence.
+ *
+ * <summary>
+ * Defines standard arithmetic operator precedence:
+ * '^' > '*' '/' > '+' '-'.
+ * </summary>
+ *
+ * @param op Operator character ('+', '-', '*', '/', '^')
+ * @return int Precedence level (higher = higher priority)
+ */
+int precedence(char op) {
+    if (op == '^') return 3;
+    if (op == '*' || op == '/') return 2;
+    if (op == '+' || op == '-') return 1;
+    return 0;
+}
 
-    /**
-     * @brief Applies a binary operator to two operands.
-     *
-     * @param a Left-hand operand
-     * @param b Right-hand operand
-     * @param op Operator character ('+', '-', '*', '/', '^')
-     * @return double Result of the operation
-     * @throws runtime_error On invalid operator, division by zero, or negative exponent
-     */
-    double applyOp(double a, double b, char op) {
-        switch (op) {
-            case '+': return a + b;
-            case '-': return a - b;
-            case '*': return a * b;
-            case '/':
-                if (b == 0) throw std::runtime_error("Division by zero");
-                return a / b;
-            case '^': {
-                if (b < 0) throw std::runtime_error("Negative exponent not supported");
-                double res = 1;
-                for (int i = 0; i < b; i++) res *= a;
-                return res;
-            }
+/**
+ * @brief Checks whether an operator is left-associative.
+ *
+ * <summary>
+ * In this evaluator, all operators are left-associative
+ * except for '^' which is right-associative.
+ * </summary>
+ *
+ * @param op Operator character
+ * @return true if left-associative; false if right-associative
+ */
+bool isLeftAssociative(char op) {
+    return (op != '^'); // '^' is right-associative
+}
+
+/**
+ * @brief Applies a binary operator to two operands.
+ *
+ * @param a Left-hand operand
+ * @param b Right-hand operand
+ * @param op Operator character ('+', '-', '*', '/', '^')
+ * @return double Result of the operation
+ * @throws runtime_error On invalid operator, division by zero, or negative exponent
+ */
+double applyOp(double a, double b, char op) {
+    switch (op) {
+        case '+': return a + b;
+        case '-': return a - b;
+        case '*': return a * b;
+        case '/':
+            if (b == 0) throw std::runtime_error("Division by zero");
+            return a / b;
+        case '^': {
+            if (b < 0) throw std::runtime_error("Negative exponent not supported");
+            double res = 1;
+            for (int i = 0; i < b; i++) res *= a;
+            return res;
         }
-        throw std::runtime_error("Invalid operator");
     }
+    throw std::runtime_error("Invalid operator");
+}
+
 } // anonymous namespace
 
 // ---- Public API ----
@@ -165,10 +168,13 @@ double ExpressionValidator::evalExpr(const std::string& exprLine) {
  */
 std::optional<double> ExpressionValidator::safeEval(const std::string& exprLine) {
     try {
-        ExpressionValidator validator;
-        double result = validator.evalExpr(exprLine);
+        double result = evalExpr(exprLine);
         return result;
+    } catch (const std::exception& e) {
+        std::cerr << "[safeEval] Exception: " << e.what() << " (exprLine=" << exprLine << ")\n";
+        return std::nullopt;
     } catch (...) {
+        std::cerr << "[safeEval] Unknown exception (exprLine=" << exprLine << ")\n";
         return std::nullopt;
     }
 }
@@ -203,8 +209,8 @@ bool ExpressionValidator::isValidExpression(const std::string& exprLine, int exp
     try {
         double lhsResult = evalExpr(lhsExprLine);
         double rhsResult = evalExpr(rhsExprLine);
-        return lhsResult == rhsResult;
-    } catch (...) {
+        return isInteger(lhsResult - rhsResult);
+    } catch (const std::exception& e) {
         return false;
     }
 }
