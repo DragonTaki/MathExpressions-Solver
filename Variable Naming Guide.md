@@ -161,4 +161,3 @@ std::vector<std::string> finalCandidatesList = { lhsString + "=" + rhsString };
 4. **Constraints**: `Constraint` objects always represent rules for a single symbol, while `constraintsMap` aggregates all of them for a given round or generation.  
 
 ---
-
