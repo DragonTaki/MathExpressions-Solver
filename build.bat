@@ -1,4 +1,8 @@
 @echo off
+:: ===============================
+::  build.bat - Build executable and run
+::  Author: DragonTaki
+:: ===============================
 cd /d %~dp0
 
 :: Set up VS compilation environment
