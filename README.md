@@ -59,6 +59,14 @@ This project is only for private use.
 
    - 驗證每個候選是否符合顏色限制與運算結果。
 
+8. 📚 支援彩色 Console 顯示及檔案 Log
+
+   - 支援跨平台（Windows 及 Unix）彩色 Console 顯示。
+
+   - 具有檔案 Logging 的功能。
+
+   - 可自訂 Log 是否換行、是否具有時間戳記、是否覆寫預設顏色。
+
 ---
 
 ## 🔄 Implementation Workflow 實作流程
