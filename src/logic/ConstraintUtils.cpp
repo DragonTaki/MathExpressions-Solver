@@ -18,7 +18,20 @@
 
 namespace ConstraintUtils {
 
-// ---------------- Character-level ----------------
+/**
+ * @brief Determines if a given character is allowed to appear in the current expression
+ *        based on its defined constraints.
+ *
+ * This function checks whether a specific character can still be used, according to
+ * its `minCount`, `maxCount`, and current `usedCount`. A character is forbidden if:
+ * - It does not exist in the `constraintsMap`.
+ * - It has both `minCount` and `maxCount` equal to 0 (completely forbidden).
+ * - Its current usage has reached or exceeded the maximum allowed count.
+ *
+ * @param exprChar The character being tested.
+ * @param constraintsMap A mapping of characters to their corresponding constraints.
+ * @return `true` if the character can be used; `false` otherwise.
+ */
 bool isCharAllowed(char exprChar, const std::unordered_map<char, Constraint>& constraintsMap) {
     auto constraintIt = constraintsMap.find(exprChar);
 
@@ -48,7 +61,18 @@ bool isCharAllowed(char exprChar, const std::unordered_map<char, Constraint>& co
     return true;
 }
 
-// ---------------- Position-level ----------------
+
+/**
+ * @brief Determines if a character can appear at a specific position in the expression.
+ *
+ * Checks whether the given character is banned from appearing in a specific index,
+ * as determined by its constraint’s banned position set (e.g., due to 'y' or 'r' feedback).
+ *
+ * @param exprChar The character being checked.
+ * @param position The position index within the expression.
+ * @param constraintsMap A map of character constraints.
+ * @return `true` if the character can appear at this position; `false` otherwise.
+ */
 bool isCharAllowedAtPos(char exprChar, int position, const std::unordered_map<char, Constraint>& constraintsMap) {
     auto constraintIt = constraintsMap.find(exprChar);
 
@@ -65,7 +89,19 @@ bool isCharAllowedAtPos(char exprChar, int position, const std::unordered_map<ch
     return true;
 }
 
-// ---------------- Token-level ----------------
+/**
+ * @brief Validates the structural integrity of a single token.
+ *
+ * Checks digit tokens for validity:
+ * - Must not be empty.
+ * - Cannot start with '0' (unless it’s a single '0').
+ * - Must contain only digits.
+ *
+ * Operators are not validated here; they are handled elsewhere.
+ *
+ * @param token The token to validate.
+ * @return `true` if the token is valid; `false` otherwise.
+ */
 bool isTokenValid(const Expression::Token& token) {
     if (token.type == Expression::TokenType::Digit) {
         const std::string& tokenValue = token.value;
@@ -94,7 +130,19 @@ bool isTokenValid(const Expression::Token& token) {
     return true;
 }
 
-// ---------------- Expression-level ----------------
+/**
+ * @brief Validates a sequence of tokens for syntactic correctness.
+ *
+ * Ensures that the sequence of tokens forms a potentially valid mathematical expression.
+ * The rules enforced include:
+ * - Expression cannot start with an operator.
+ * - No consecutive operators are allowed.
+ * - Consecutive exponentiation ('^') operators are invalid.
+ * - Division by zero or standalone '0' tokens are invalid.
+ *
+ * @param tokensList The sequence of tokens representing part of an expression.
+ * @return `true` if the token sequence is syntactically valid; `false` otherwise.
+ */
 bool isTokenSequenceValid(const std::vector<Expression::Token>& tokensList) {
     if (tokensList.empty()) return false;
 
@@ -130,18 +178,26 @@ bool isTokenSequenceValid(const std::vector<Expression::Token>& tokensList) {
             tokensList.back().value == "/" &&
             lastToken.value == "0")
             return false;
+
+        // Single '0' cannot be a token ("+0" / "-0" / "*0" / "^0" are invalid expressions)
+        if (lastToken.value == "0")
+            return false;
     }
 
     return true;
 }
 
 /**
- * @brief Check if the current position conflicts with any green positions of other characters.
- * 
- * @param exprChar The character at the current position.
- * @param position The current index in the expression.
- * @param constraintsMap Map of character constraints.
- * @return true if no green-position conflict, false if some other character must occupy this position.
+ * @brief Ensures a character does not conflict with other characters’ fixed green positions.
+ *
+ * This function prevents a situation where two characters are both assigned
+ * to the same green position (fixed correct position). It scans all constraints
+ * and denies placement if another symbol is already "green" at the target position.
+ *
+ * @param exprChar The character being tested.
+ * @param position The position index in the expression.
+ * @param constraintsMap A map of constraints for all characters.
+ * @return `true` if no conflicts are found; `false` otherwise.
  */
 bool isCharSafeAtPosition(
     char exprChar,
@@ -153,7 +209,7 @@ bool isCharSafeAtPosition(
 
         const auto& greenPositions = constraint.greenPos();
         if (greenPositions.count(position) > 0) {
-            // 這個位置已被其他字元綠色固定，當前字元不可用
+            // Another character is already fixed at this position
             return false;
         }
     }
@@ -161,7 +217,20 @@ bool isCharSafeAtPosition(
     return true;
 }
 
-// ---------------- Candidate Check ----------------
+/**
+ * @brief Validates a complete expression candidate based on constraint rules.
+ *
+ * Performs a multi-level validation of an entire expression string against
+ * defined symbol constraints. This includes:
+ * - Character-level validation (existence and usage limits).
+ * - Position-level validation (banned positions).
+ * - Conflict checking for fixed positions (green overlaps).
+ * - Final count matching with min/max occurrence rules.
+ *
+ * @param exprLine The full expression candidate string.
+ * @param constraintsMap Map containing all constraints for each symbol.
+ * @return `true` if the candidate satisfies all constraint conditions; `false` otherwise.
+ */
 bool isCandidateValid(
     const std::string& exprLine,
     const std::unordered_map<char, Constraint>& constraintsMap
@@ -186,7 +255,7 @@ bool isCandidateValid(
         }
     }
 
-    // Check if macth min/max constraints
+    // Check if appearance count matches constraints
     std::unordered_map<char, int> appearCountMap;
     for (char exprChar : exprLine) {
         appearCountMap[exprChar]++;
@@ -202,4 +271,4 @@ bool isCandidateValid(
     return true;
 }
 
-} // namespace (end of ConstraintUtils)
+}  // namespace (end of ConstraintUtils)

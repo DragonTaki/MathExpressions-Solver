@@ -42,4 +42,4 @@ namespace FilenameFormatter {
  */
 std::string Format(const std::string& templateStr);
 
-} // namespace (end of Expression)
+}  // namespace (end of Expression)

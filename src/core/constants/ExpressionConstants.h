@@ -116,4 +116,4 @@ inline const std::unordered_set<char> FEEDBACK_COLOR_LOOKUP(
     FEEDBACK_COLORS.begin(), FEEDBACK_COLORS.end()    ///< Initialize from array
 );
 
-} // namespace (end of Expression)
+}  // namespace (end of Expression)

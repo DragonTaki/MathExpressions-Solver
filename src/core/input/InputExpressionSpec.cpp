@@ -21,7 +21,23 @@
 #include "core.h"
 #include "ranges.h"
 
-// -------------------- Read expression length and available operators --------------------
+/**
+ * @brief Prompt the user to input the expression length and available operators.
+ * 
+ * This function repeatedly prompts the user until a valid input is provided.
+ * The expected input format is: "<length> <operators>", e.g., "8 + - *" or "8+-*".
+ * 
+ * Validation steps:
+ *   1. The first token must be an integer >= 5 representing the expression length.
+ *   2. The remaining characters are interpreted as operators.
+ *   3. Each operator must exist in `InputUtils::isValidOperator`.
+ *   4. The '+' operator is mandatory.
+ * 
+ * @param[out] exprLength Reference to store the parsed expression length.
+ * @param[out] operatorsSet Reference to store the set of valid operators.
+ * @return true If a valid expression length and operator set are successfully read.
+ * @return false If the input stream ends before valid input is provided.
+ */
 bool InputExpressionSpec::readLengthAndOps(int& exprLength, std::unordered_set<char>& operatorsSet) {
     while (true) {
         AppLogger::Prompt("Input expression length and available operators (e.g. \"8 + - * /\", or \"8+-*/\"): ", LogColor::Yellow);
@@ -84,6 +100,17 @@ bool InputExpressionSpec::readLengthAndOps(int& exprLength, std::unordered_set<c
     return false;
 }
 
+/**
+ * @brief High-level wrapper to read the full expression specification.
+ * 
+ * Currently, this function simply calls `readLengthAndOps` to get the expression
+ * length and available operators from the user.
+ * 
+ * @param[out] exprLength Reference to store the parsed expression length.
+ * @param[out] operatorsSet Reference to store the set of valid operators.
+ * @return true If a valid expression specification is successfully read.
+ * @return false If the input stream ends before valid input is provided.
+ */
 bool InputExpressionSpec::readExpressionSpec(int& exprLength, std::unordered_set<char>& operatorsSet) {
-    return readLengthAndOps(exprLength, operatorsSet); // 使用原本工具函數
+    return readLengthAndOps(exprLength, operatorsSet);  // Use existing utility function
 }

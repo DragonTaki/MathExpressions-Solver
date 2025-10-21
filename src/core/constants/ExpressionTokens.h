@@ -67,5 +67,5 @@ struct Token {
     std::string value;  ///< The actual textual representation of the token (e.g., "123", "+")
 };
 
-} // namespace (end of Expression)
+}  // namespace (end of Expression)
 

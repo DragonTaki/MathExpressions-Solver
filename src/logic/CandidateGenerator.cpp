@@ -3,8 +3,8 @@
 // Do not distribute or modify
 // Author: DragonTaki (https://github.com/DragonTaki)
 // Create Date: 2025/10/02
-// Update Date: 2025/10/16
-// Version: v2.0
+// Update Date: 2025/10/20
+// Version: v2.1
 /* ----- ----- ----- ----- */
 
 #include "CandidateGenerator.h"
@@ -26,16 +26,23 @@
 CandidateGenerator::CandidateGenerator(ExpressionValidator& validator)
     : validator(validator) {}
 
-// =========================
-//  Internal Helper Section
-// =========================
+/** =========================
+ *  Internal Helper Section
+ *  =========================
+ */
 namespace {
 
 /**
- * @brief Convert a list of tokens into a single concatenated expression string.
+ * @brief Converts a list of tokens into a single concatenated expression string.
  *
- * @param tokensList A vector containing expression tokens.
- * @return Concatenated string representing the full expression.
+ * @param tokensList Vector of expression tokens to concatenate.
+ * @return std::string Concatenated expression string.
+ *
+ * <summary>
+ * Each token contains a type (Digit or Operator) and a value string.
+ * This function merges all token values to produce the complete expression string.
+ * Used mainly for logging or passing to the ExpressionValidator.
+ * </summary>
  */
 std::string tokenVecToString(const std::vector<Expression::Token>& tokensList) {
     std::string exprLine;
@@ -48,12 +55,28 @@ std::string tokenVecToString(const std::vector<Expression::Token>& tokensList) {
     return exprLine;
 }
 
-} // namespace (end of internal helpers)
+}  // namespace (end of internal helpers)
 
-// =========================
-//  Public Functions Section
-// =========================
+/** =========================
+ *  Public Functions Section
+ *  =========================
+ */
 
+/**
+ * @brief Checks whether a RHS length is feasible given a LHS length and operators.
+ *
+ * @param lhsLength Length of the left-hand side expression.
+ * @param rhsLength Expected length of the right-hand side (answer) expression.
+ * @param operatorsSet Allowed set of operators.
+ * @return true if a RHS of length `rhsLength` is feasible, false otherwise.
+ *
+ * <summary>
+ * This function calculates the theoretical maximum value of the LHS expression using
+ * logarithmic bounds, considering operator types and number block lengths.
+ * If the maximum number of digits on RHS can accommodate `rhsLength`, returns true.
+ * Useful to prune impossible positions for '=' before DFS generation.
+ * </summary>
+ */
 bool CandidateGenerator::isRhsLengthFeasible(
     int lhsLength,
     int rhsLength,
@@ -61,11 +84,11 @@ bool CandidateGenerator::isRhsLengthFeasible(
 ) const {
     if (lhsLength <= 0 || rhsLength <= 0) return false;
 
-    // m = 數字塊數量 (numbers)，最多為 floor((lhsLength + 1) / 2)
-    int m_max = (lhsLength + 1) / 2;
-    long double bestLog = -INFINITY; // 最佳（最大）log10(value) 的上界
+    // m = Number of blocks (numbers), at most floor((lhsLength + 1) / 2)
+    int numberBlockLength = (lhsLength + 1) / 2;  ///< Max lngth of single number block, "number 'op' number" => lhs
+    long double bestLog = -INFINITY;              ///< Upper bound of the optimal (maximum) log10(value)
 
-    // 工具 lambda：log10(10^len - 1) 精準近似
+    // Tool lambda: log10(10^len - 1) accurate approximation
     auto log10_of_all9 = [](int len) -> long double {
         // log10(10^len - 1) = len + log10(1 - 10^{-len})
         if (len <= 0) return -INFINITY;
@@ -74,12 +97,12 @@ bool CandidateGenerator::isRhsLengthFeasible(
         return (long double)len + adj;
     };
 
-    // 遍歷可能的 number 個數 m
-    for (int m = 1; m <= m_max; ++m) {
-        int sumDigits = lhsLength - (m - 1); // 數字總位數（因為 m-1 個運算符各佔 1 字元）
-        if (sumDigits < m) continue; // 不可能（每個數字至少 1 位）
+    // Traverse the m possible number
+    for (int m = 1; m <= numberBlockLength; ++m) {
+        int sumDigits = lhsLength - (m - 1);  // The total number of digits in the number (because m-1 operators each take up 1 character)
+        if (sumDigits < m) continue;  // Impossible (each number must have at least 1 digit)
 
-        // 使用遞迴產生把 sumDigits 分成 m 個正整數 (composition)
+        // Use recursive generation to split sumDigits into m positive integers (composition)
         std::vector<int> parts(m, 1);
 
         std::function<void(int,int)> dfs = [&](int idx, int remaining) {
@@ -173,6 +196,23 @@ bool CandidateGenerator::isRhsLengthFeasible(
     return maxDigits >= rhsLength;
 }
 
+/**
+ * @brief Recursive DFS to generate all valid LHS token sequences.
+ *
+ * @param lhsLength Length of the LHS expression.
+ * @param operatorsSet Set of allowed operators.
+ * @param currentTokens Current token sequence being built.
+ * @param lhsCandidatesList Reference to store generated candidate token sequences.
+ * @param lhsConstraintsMap Map of constraints for symbols (min/max counts, green positions).
+ * @param requiredCharsAtPos List of characters that must occupy specific positions (green positions).
+ * @param dfsDepth Current recursion depth (for logging/debug purposes).
+ *
+ * <summary>
+ * This function attempts to append valid digits/operators at each position,
+ * respects min/max counts, green positions, and merges digit tokens when necessary.
+ * Backtracking ensures all valid sequences are explored.
+ * </summary>
+ */
 void CandidateGenerator::_dfsGenerateLeftTokens(
     int lhsLength,
     const std::unordered_set<char>& operatorsSet,
@@ -234,18 +274,19 @@ void CandidateGenerator::_dfsGenerateLeftTokens(
                 : Expression::TokenType::Operator;
 
         // Try to get last token
-        Expression::Token* lastToken = currentTokens.empty() ? nullptr : &currentTokens.back();
+        bool hasLast = !currentTokens.empty();
+        size_t lastIndex = hasLast ? currentTokens.size() - 1 : 0;
 
         // Merge check (If prev == digit && this == digit)
         bool isMerged = false;
         Expression::Token newToken{tokenType, std::string(1, exprChar)};
         // Previous token == digit && this token == digit => Merge
-        if (lastToken && lastToken->type == Expression::TokenType::Digit && tokenType == Expression::TokenType::Digit) {
+        if (hasLast && currentTokens[lastIndex].type == Expression::TokenType::Digit && tokenType == Expression::TokenType::Digit) {
             // Digit start with '0' is not allowed
-            if (lastToken->value.size() == 1 && lastToken->value[0] == '0') {
+            if (currentTokens[lastIndex].value.size() == 1 && currentTokens[lastIndex].value[0] == '0') {
                 return;
             }
-            lastToken->value.push_back(exprChar);
+            currentTokens[lastIndex].value.push_back(exprChar);
             isMerged = true;
         }
         // Cannot merge, generate new token
@@ -255,8 +296,8 @@ void CandidateGenerator::_dfsGenerateLeftTokens(
 
         // Finalize previous token (when type changes or token ends)
         // Only when NOT merged (e.g., operator after digit, digit after operator)
-        if (!isMerged && lastToken) {
-            if (!ConstraintUtils::isTokenValid(*lastToken)) {
+        if (!isMerged && hasLast) {
+            if (!ConstraintUtils::isTokenValid(currentTokens[lastIndex])) {
                 // Previous token invalid => rollback (don't proceed)
                 return;
             }
@@ -273,7 +314,7 @@ void CandidateGenerator::_dfsGenerateLeftTokens(
         if (!ConstraintUtils::isTokenSequenceValid(currentTokens)) {
             // Rollback merge if invalid
             if (isMerged)
-                lastToken->value.pop_back();
+                currentTokens[lastIndex].value.pop_back();
             else
                 currentTokens.pop_back();
             return;
@@ -292,7 +333,7 @@ void CandidateGenerator::_dfsGenerateLeftTokens(
             lhsConstraintsMap[exprChar].usedCount()--;
 
         if (isMerged) {
-            lastToken->value.pop_back();;
+            currentTokens[lastIndex].value.pop_back();
         } else {
             currentTokens.pop_back();
         }
@@ -318,6 +359,21 @@ void CandidateGenerator::_dfsGenerateLeftTokens(
     }
 }
 
+/**
+ * @brief Prepares green position map and initiates DFS generation for LHS tokens.
+ *
+ * @param lhsLength Length of the LHS expression.
+ * @param operatorsSet Set of allowed operators.
+ * @param currentTokens Initial token vector (can be empty).
+ * @param lhsCandidatesList Reference to store generated LHS token sequences.
+ * @param lhsConstraintsMap Symbol constraints map (min/max, used count, green positions).
+ * @param dfsDepth Initial DFS recursion depth (usually 0).
+ *
+ * <summary>
+ * Constructs `requiredAtPosList` from green positions in constraints and calls
+ * `_dfsGenerateLeftTokens` to perform recursive token generation.
+ * </summary>
+ */
 void CandidateGenerator::generateLeftTokens(
     int lhsLength,
     const std::unordered_set<char>& operatorsSet,
@@ -358,6 +414,25 @@ void CandidateGenerator::generateLeftTokens(
         lhsConstraintsMap, requiredAtPosList, dfsDepth);
 }
 
+/**
+ * @brief Generates candidate expressions of specified length satisfying constraints.
+ *
+ * @param expLength Target expression length.
+ * @param operatorsSet Set of allowed operators.
+ * @param expressions Previous expressions for constraint derivation.
+ * @param expressionColors Corresponding color patterns (green/yellow/gray) for each expression.
+ * @param constraintsMap Symbol constraints map; will be updated inside.
+ * @return std::vector<std::string> List of valid candidate expressions matching constraints.
+ *
+ * <summary>
+ * This is the main entry point to generate all candidate expressions for a given length.
+ * - Determines possible '=' positions (respecting green positions and conflicts).
+ * - Prunes impossible RHS lengths.
+ * - Uses DFS to generate all valid LHS token sequences.
+ * - Evaluates each LHS to produce RHS, respecting integer, non-negative, and length rules.
+ * - Filters candidates according to min/max constraints using ConstraintUtils.
+ * </summary>
+ */
 std::vector<std::string> CandidateGenerator::generate(
     int expLength,
     const std::unordered_set<char>& operatorsSet,
@@ -456,6 +531,14 @@ std::vector<std::string> CandidateGenerator::generate(
     }
 
     std::vector<int> eqSignPositionsList;  ///< locations '=' might locate at
+    // Collect positions already occupied by other symbols' green positions
+    std::unordered_set<int> occupiedGreenPositions;
+    for (auto& [ch, con] : constraintsMap) {
+        if (ch == '=') continue;
+        for (int pos : con.greenPos()) {
+            occupiedGreenPositions.insert(pos);
+        }
+    }
 
     // Check if '=' has fixed location
     if (!eqSignConstraint.greenPos().empty()) {  // Green position not empty => Has fixed location
@@ -466,8 +549,17 @@ std::vector<std::string> CandidateGenerator::generate(
     } else {                                 // Empty => Try every possible location
         //AppLogger::Trace(fmt::format("[eqPos] eqPos does not has fixed position, will traverse it"));
         for (int eqPos = expLength - 2; eqPos >= 3; --eqPos) {
+            if (occupiedGreenPositions.count(eqPos) > 0) {
+                AppLogger::Trace(fmt::format(
+                    "[eqPos] Skip eqPos={} (occupied by another green symbol)", eqPos));
+                continue;
+            }
             eqSignPositionsList.push_back(eqPos);
         }
+    }
+
+    if (eqSignPositionsList.empty()) {
+        AppLogger::Warn("[eqPos] No available position for '=' after excluding green conflicts");
     }
 
     // Try to generate lhs, sort by '=' positions

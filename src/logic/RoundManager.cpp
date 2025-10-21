@@ -20,14 +20,25 @@
 #include "GameRoundState.h"
 #include "core/input/InputExpressionLine.h"
 #include "core/input/InputExpressionSpec.h"
+#include "core/input/InputUtils.h"
 #include "core/logging/AppLogger.h"
 #include "util/ConsoleUtils.h"
 
+/**
+ * @brief Initializes a new round while keeping existing game configuration.
+ *
+ * This function clears all per-round data (candidates, constraints, etc.)
+ * while retaining the specified expression length and operator set.
+ * It is typically used when starting a new round within the same game.
+ *
+ * @param exprLength The length of the expression for the round.
+ * @param operatorsSet The set of available operator characters (e.g. '+', '-', '*', '/').
+ */
 void RoundManager::initializeRound(
     int exprLength,
     const std::unordered_set<char>& operatorsSet
 ) {
-    gameRoundState.resetRoundData(); // 清空回合資料
+    gameRoundState.resetRoundData();  // Clear round data (keep configuration)
     gameRoundState.exprLength = exprLength;
     gameRoundState.operatorsSet = operatorsSet;
 
@@ -37,6 +48,12 @@ void RoundManager::initializeRound(
     AppLogger::Debug("Initialized new round.");
 }
 
+/**
+ * @brief Resets only the current round data without altering game configuration.
+ *
+ * This function clears the round history, constraint map, and candidate list.
+ * It is useful for restarting the same round parameters without modifying global settings.
+ */
 void RoundManager::resetRound() {
     gameRoundState.resetRoundData();
     constraintsMap.clear();
@@ -45,6 +62,12 @@ void RoundManager::resetRound() {
     AppLogger::Info("Round has been reset.");
 }
 
+/**
+ * @brief Performs a full reset of the game, clearing all data and configuration.
+ *
+ * This function resets the game state completely, including expression length,
+ * operators, constraints, and candidate list.
+ */
 void RoundManager::resetGame() {
     gameRoundState.resetGameData();
     constraintsMap.clear();
@@ -53,50 +76,137 @@ void RoundManager::resetGame() {
     AppLogger::Info("Game has been fully reset.");
 }
 
-// Input first round: length & operators, first expression, first color feedback
-bool RoundManager::startRound() {
+/**
+ * @brief Reads the player's input for both the expression and its feedback colors.
+ *
+ * This function prompts the user to input an expression and corresponding
+ * color feedback, supporting special commands like `"undo"` (rollback previous round)
+ * and `"end"` (finish the current session).
+ *
+ * @param[out] exprLine The user-entered expression string (e.g., `"12+46=58"`).
+ * @param[out] exprColorLine The user-entered color feedback string (e.g., `"ryryygrr"`).
+ * @return `true` if input was successfully read; `false` if the user chose to end input or an error occurred.
+ */
+bool RoundManager::readPlayerInput(std::string& exprLine, std::string& exprColorLine) {
+    int roundIndex = static_cast<int>(gameRoundState.roundHistory.size());
+
+    std::string exprPrompt;
+    std::string colorPrompt;
+
+    AppLogger::Prompt("----- ----- ----- -----", LogColor::Gray);
+    if (roundIndex == 0) {
+        exprPrompt = std::format(
+            "Round {} - Input expression (or 'end' to finish, 'undo' to rollback)\n"
+            "Example: 12+46=58 (or 12 + 46 = 58)\n"
+            "Your input: ", roundIndex + 1);
+
+        colorPrompt = std::format(
+            "Round {} - Input color feedback\n"
+            "Example: ryryygrr (or r y r y y g r r)\n"
+            "Your input: ", roundIndex + 1);
+    } else {
+        exprPrompt = std::format("Round {} - Input expression: ", roundIndex + 1);
+        colorPrompt = std::format("Round {} - Input color feedback: ", roundIndex + 1);
+    }
+
+    /**
+     * @brief Lambda function that handles special text commands during expression input.
+     *
+     * Recognizes `"undo"` (rollback previous round) and `"end"` (terminate input).
+     */
+    auto handleExprSpecial = [this](const std::string& command) -> SpecialCommandResult {
+        if (command == "undo") {
+            // Perform rollback, continue waiting for input afterward
+            bool ok = this->rollback();
+            return SpecialCommandResult::HANDLED_CONTINUE;
+        }
+        if (command == "end") {
+            // Stop accepting input for this round
+            return SpecialCommandResult::HANDLED_STOP_INPUT;
+        }
+        return SpecialCommandResult::NOT_SPECIAL;
+    };
+
+    /**
+     * @brief Lambda function that handles special commands during color feedback input.
+     *
+     * Allows `"undo"` and `"end"` to function similarly to expression input stage.
+     */
+    auto handleColorSpecial = [this](const std::string& command) -> SpecialCommandResult {
+        if (command == "undo") {
+            bool ok = this->rollback();
+            return SpecialCommandResult::HANDLED_CONTINUE;
+        }
+        if (command == "end") {
+            return SpecialCommandResult::HANDLED_STOP_INPUT;
+        }
+        return SpecialCommandResult::NOT_SPECIAL;
+    };
+
+    // Read expression and color feedback using input readers
+    if (!exprReader.readExpression(exprLine, gameRoundState.exprLength, validator, handleExprSpecial, exprPrompt))
+        return false;
+
+    if (!exprReader.readColorFeedback(exprColorLine, gameRoundState.exprLength, handleColorSpecial, colorPrompt))
+        return false;
+
+    return true;
+}
+
+/**
+ * @brief Processes a single round of input and updates constraints and candidates accordingly.
+ *
+ * This method handles:
+ *  - Reading player input (expression and color feedback)
+ *  - Updating constraint maps
+ *  - Regenerating or filtering candidate expressions
+ *  - Logging and console output
+ *
+ * @return `true` if the round was processed successfully; `false` if user ended input or an exception occurred.
+ */
+bool RoundManager::processRoundInput() {
     try {
-        int exprLength;
-        std::unordered_set<char> operatorsSet;
+        RoundRecord currentRound;
     
-        // Error handling & Read expression length and available operators
-        if (!specReader.readExpressionSpec(exprLength, operatorsSet))
-            throw std::runtime_error("Failed to read length and operators.");
+        // Check if expression spec is required
+        if (gameRoundState.exprLength == 0) {
+            int exprLength;
+            std::unordered_set<char> operatorsSet;
 
-        // 初始化回合狀態
-        initializeRound(exprLength, operatorsSet);
+            if (!specReader.readExpressionSpec(exprLength, operatorsSet))
+                throw std::runtime_error("Failed to read length and operators.");
 
-        validator.setValidOps(gameRoundState.operatorsSet);
+            initializeRound(exprLength, operatorsSet);
+            validator.setValidOps(gameRoundState.operatorsSet);
+        }
 
-        // First time read expression and color feedback
-        RoundRecord firstRound;
-        AppLogger::Prompt("Input expression (or 'end' to finish, 'undo' to rollback) (e.g. \"12 + 46 = 58\", or \"12+46=58\"):", LogColor::Yellow);
-        if (!exprReader.readExpression(firstRound.exprLine, gameRoundState.exprLength, validator))
-            throw std::runtime_error("Failed to read first expression.");
+        // Read expression and feedback input
+        if (!readPlayerInput(currentRound.exprLine, currentRound.exprColorLine))
+            return false;  // User requested to end / undo handled in callback
 
-        AppLogger::Prompt("Input color feedback (e.g. \"r y r y y g r r\", or \"ryryygrr\"): ", LogColor::Yellow);
-        if (!exprReader.readColorFeedback(firstRound.exprColorLine, gameRoundState.exprLength))
-            throw std::runtime_error("Failed to read first color feedback.");
+        // Save this round's data to history
+        gameRoundState.roundHistory.push_back(currentRound);
 
-        // Save to roundHistory
-        gameRoundState.roundHistory.push_back(firstRound);
+        // Update constraint map using current feedback
+        updateConstraint(constraintsMap, currentRound.exprLine, currentRound.exprColorLine);
 
-        // 更新 constraints
-        updateConstraint(constraintsMap, firstRound.exprLine, firstRound.exprColorLine);
+        // Generate or filter candidate list
+        bool firstRoundInput = (gameRoundState.roundHistory.size() == 1);
+        if (firstRoundInput) {
+            CandidateGenerator generator(validator);
+            gameRoundState.initialCandidatesList = generator.generate(
+                gameRoundState.exprLength,
+                gameRoundState.operatorsSet,
+                {currentRound.exprLine},
+                {currentRound.exprColorLine},
+                constraintsMap
+            );
+            currentCandidatesList = gameRoundState.initialCandidatesList;
+        } else {
+            currentCandidatesList = validator.filterExpressions(currentCandidatesList, constraintsMap);
+        }
 
-        // Generate initial candidates
-        CandidateGenerator generator(validator);
-        gameRoundState.initialCandidatesList = generator.generate(
-            gameRoundState.exprLength,
-            gameRoundState.operatorsSet,
-            {firstRound.exprLine},
-            {firstRound.exprColorLine},
-            constraintsMap
-        );
-
-        currentCandidatesList = gameRoundState.initialCandidatesList;
-
-        // Print results
+        // Print result candidates
         if (currentCandidatesList.empty())
             AppLogger::Prompt("No solution.", LogColor::Red);
         else {
@@ -105,53 +215,20 @@ bool RoundManager::startRound() {
 
         return true;
     } catch (const std::exception& e) {
-        AppLogger::Error(std::format("startRound failed: {}", e.what()));
+        AppLogger::Error(std::format("processRoundInput failed: {}", e.what()));
         return false;
     }
 }
 
-// Subsequent input, filtering from existing candidates
-bool RoundManager::nextRoundInput() {
-    // Error handling: Empty candidates (should not be here)
-    if (currentCandidatesList.empty()) return false;
-
-    std::string exprLine;       ///< Following expression guess, or "end" for end whole round
-    std::string exprColorLine;  ///< The color pairing the expression
-
-    AppLogger::Prompt("----- ----- ----- -----", LogColor::Gray);
-
-    if (!InputExpressionLine::readPlayerInput(exprLine, exprColorLine, gameRoundState.exprLength, validator)) {
-        if (exprLine == "undo") {
-            rollback();
-            return true;
-        }
-        if (exprLine == "end") return false;
-        return false;  // 若輸入錯誤或EOF
-    }
-    
-    // Update constraint
-    bool isUpdated = updateConstraint(constraintsMap, exprLine, exprColorLine);
-    if (isUpdated) {
-        printConstraint(constraintsMap);
-    }
-
-    // Save current round to RoundRecord
-    RoundRecord newRound{exprLine, exprColorLine};
-    gameRoundState.roundHistory.push_back(newRound);
-
-    // Filter candidates
-    currentCandidatesList = validator.filterExpressions(currentCandidatesList, constraintsMap);
-
-    // Show filtered results
-    std::cout << "--- Filtered candidates ---\n";
-    if (currentCandidatesList.empty())
-        AppLogger::Prompt("No solution.", LogColor::Red);
-    else
-        ConsoleUtils::printCandidatesInline(currentCandidatesList);
-
-    return true;
-}
-
+/**
+ * @brief Rolls back the game state by removing the most recent round.
+ *
+ * This function removes the last round record from history, rebuilds the constraint
+ * map from all remaining previous rounds, and recalculates the candidate list.
+ * It is primarily triggered by the `"undo"` command from user input.
+ *
+ * @return `true` if rollback succeeded; `false` if there was no round to rollback.
+ */
 bool RoundManager::rollback()
 {
     if (gameRoundState.roundHistory.empty()) {
@@ -159,16 +236,30 @@ bool RoundManager::rollback()
         return false;
     }
 
-    // 移除最後一回合
+    // Remove the most recent round record
     gameRoundState.roundHistory.pop_back();
-    AppLogger::Info("Rolled back one round.");
+    AppLogger::Prompt("Rolled back one round.", LogColor::Magenta);
 
-    // 重建 constraint 與候選
+    // Rebuild constraints from remaining rounds
     constraintsMap.clear();
+    constraintsMap = initializeConstraintsMap();
+    for (auto& record : gameRoundState.roundHistory) {
+        updateConstraint(constraintsMap, record.exprLine, record.exprColorLine);
+    }
 
-    currentCandidatesList = validator.filterExpressions(gameRoundState.initialCandidatesList, constraintsMap);
+    // Rebuild candidate list
+    if (gameRoundState.roundHistory.empty()) {
+        // If no previous rounds, revert to initial candidates
+        currentCandidatesList = gameRoundState.initialCandidatesList;
+    } else {
+        // Otherwise filter from the initial candidate pool
+        currentCandidatesList = validator.filterExpressions(
+            gameRoundState.initialCandidatesList,
+            constraintsMap
+        );
+    }
 
-    // 顯示結果
+    // Display current constraint state and filtered candidates
     printConstraint(constraintsMap);
     ConsoleUtils::printCandidatesInline(currentCandidatesList);
 

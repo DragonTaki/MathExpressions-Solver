@@ -299,6 +299,20 @@ std::unordered_map<char, Constraint> deriveConstraints(
     int expLength
 );
 
+/**
+ * @brief Updates an existing constraints map using a single guess-feedback pair.
+ * 
+ * <summary>
+ * Applies positional and count-based updates to an existing constraints map
+ * from a new guess-feedback pair. Detects conflicts and updates green/yellow/red
+ * positions accordingly.
+ * </summary>
+ * 
+ * @param constraintsMap Map of exprChar → Constraint to update
+ * @param exprLine Guessed expression string
+ * @param exprColorLine Feedback string ('g', 'y', 'r')
+ * @return true if constraints were updated; otherwise false
+*/
 bool updateConstraint(
     std::unordered_map<char, Constraint>& constraintsMap,
     const std::string& exprLine,

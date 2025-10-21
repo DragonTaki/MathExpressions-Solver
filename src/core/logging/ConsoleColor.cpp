@@ -15,10 +15,25 @@
 namespace ConsoleColor {
 
 /**
- * @brief Retrieve console color for a log level.
+ * @brief Retrieves the default console color corresponding to a given log level.
  *
- * @param logLevel LogLevel
- * @return LogColor Corresponding console color
+ * <summary>
+ * This function maps each LogLevel to a predefined LogColor for consistent
+ * console output formatting. It ensures that log messages of different
+ * severity levels are displayed with appropriate visual distinction.
+ * </summary>
+ *
+ * <details>
+ * Example color mapping:
+ * - Trace, Debug → Gray  
+ * - Info → White  
+ * - Warn → Yellow  
+ * - Error → Red  
+ * - Default / Unknown → Default (system default color)
+ * </details>
+ *
+ * @param logLevel The log level whose color should be retrieved.
+ * @return The LogColor corresponding to the specified LogLevel.
  */
 LogColor GetLevelColor(LogLevel logLevel) {
     switch (logLevel) {
@@ -32,10 +47,24 @@ LogColor GetLevelColor(LogLevel logLevel) {
 }
 
 /**
- * @brief Convert LogColor to ANSI escape code for POSIX terminals.
+ * @brief Converts a LogColor value to its corresponding ANSI escape code for POSIX terminals.
  *
- * @param logColor LogColor value
- * @return std::string ANSI escape code
+ * <summary>
+ * ANSI escape codes are used in Unix-like systems (Linux, macOS, etc.)
+ * to colorize terminal text output. This function translates LogColor values
+ * into appropriate ANSI sequences for visual display.
+ * </summary>
+ *
+ * <remarks>
+ * These codes are ignored on Windows terminals unless ANSI support is explicitly enabled.
+ * </remarks>
+ *
+ * @param logColor The LogColor to convert.
+ * @return A string containing the ANSI escape sequence for the specified color.
+ *
+ * <example>
+ * std::cout << ConsoleColor::ToAnsi(LogColor::Green) << "Success!" << "\033[0m";
+ * </example>
  */
 std::string ToAnsi(LogColor logColor) {
     switch (logColor) {
@@ -53,10 +82,26 @@ std::string ToAnsi(LogColor logColor) {
 
 #ifdef _WIN32
 /**
- * @brief Convert LogColor to Windows console attribute.
+ * @brief Converts a LogColor value into a Windows console attribute constant.
  *
- * @param logColor LogColor value
- * @return WORD Windows console attribute
+ * <summary>
+ * This function maps LogColor values to Windows API console attributes,
+ * which are used with SetConsoleTextAttribute() to change text color.
+ * </summary>
+ *
+ * <remarks>
+ * Works only on Windows platforms.  
+ * The FOREGROUND_* constants define RGB color components and intensity.
+ * </remarks>
+ *
+ * @param logColor The LogColor to convert.
+ * @return A WORD value representing the Windows console text color attribute.
+ *
+ * <example>
+ * HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+ * SetConsoleTextAttribute(hConsole, ConsoleColor::ToWindowsAttr(LogColor::Yellow));
+ * std::cout << "Warning message" << std::endl;
+ * </example>
  */
 WORD ToWindowsAttr(LogColor logColor) {
     switch (logColor) {

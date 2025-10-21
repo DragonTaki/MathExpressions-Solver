@@ -59,24 +59,57 @@ bool isLeftAssociative(char op) {
 /**
  * @brief Applies a binary operator to two operands.
  *
+ * <summary>
+ * Supports '+', '-', '*', '/', '^' with safety checks:
+ * - Division by zero
+ * - Non-integer division (rejected)
+ * - Fraction too small (rejected)
+ * - Negative exponent (rejected)
+ * - Exponent overflow check
+ * </summary>
+ *
  * @param a Left-hand operand
  * @param b Right-hand operand
  * @param op Operator character ('+', '-', '*', '/', '^')
  * @return double Result of the operation
- * @throws runtime_error On invalid operator, division by zero, or negative exponent
+ * @throws runtime_error On invalid operator, division by zero, non-integer division, or invalid exponent
  */
 double applyOp(double a, double b, char op) {
+    constexpr double EPSILON = 1e-9;
+
     switch (op) {
         case '+': return a + b;
         case '-': return a - b;
         case '*': return a * b;
-        case '/':
-            if (b == 0) throw std::runtime_error("Division by zero");
-            return a / b;
+        case '/': {
+            if (std::abs(b) < EPSILON)
+                throw std::runtime_error("Division by zero");
+
+            // ---- Integer division check ----
+            // Only allow division when a and b are integers and divisible
+            if (std::abs(a - std::round(a)) < EPSILON &&
+                std::abs(b - std::round(b)) < EPSILON) {
+                long long ia = static_cast<long long>(std::round(a));
+                long long ib = static_cast<long long>(std::round(b));
+                if (ia % ib != 0)
+                    throw std::runtime_error("Non-integer division not allowed");
+                return static_cast<double>(ia / ib);
+            }
+
+            // Otherwise reject small decimal divisions (e.g. 1/99999)
+            double result = a / b;
+            if (std::abs(result) < 1e-6)
+                throw std::runtime_error("Fraction too small, invalid for integer expression");
+
+            return result;
+        }
         case '^': {
-            if (b < 0) throw std::runtime_error("Negative exponent not supported");
+            if (b < 0)
+                throw std::runtime_error("Negative exponent not supported");
+            if (std::abs(a) > 1e6 || b > 10)
+                throw std::runtime_error("Exponent too large, overflow risk");
             double res = 1;
-            for (int i = 0; i < b; i++) res *= a;
+            for (int i = 0; i < static_cast<int>(b); i++) res *= a;
             return res;
         }
     }
@@ -209,7 +242,21 @@ bool ExpressionValidator::isValidExpression(const std::string& exprLine, int exp
     try {
         double lhsResult = evalExpr(lhsExprLine);
         double rhsResult = evalExpr(rhsExprLine);
-        return isInteger(lhsResult - rhsResult);
+
+        if (!std::isfinite(lhsResult) || !std::isfinite(rhsResult))
+            return false;
+
+        // ---- Integer check for both sides ----
+        if (!isInteger(lhsResult) || !isInteger(rhsResult))
+            return false;
+
+        // ---- Relative comparison ----
+        double diff = std::abs(lhsResult - rhsResult);
+        double denom = std::max(1.0, std::max(std::abs(lhsResult), std::abs(rhsResult)));
+        if (diff / denom < 1e-9)
+            return true;
+
+        return false;
     } catch (const std::exception& e) {
         return false;
     }
@@ -223,6 +270,7 @@ bool ExpressionValidator::isValidExpression(const std::string& exprLine, int exp
  * @return true if val is an integer within tolerance
  */
 bool ExpressionValidator::isInteger(double value, double epsilon) {
+    if (!std::isfinite(value)) return false;
     double nearest = std::round(value);               // Nearest integer
     return std::abs(value - nearest) < epsilon;       // Gap < epsilon => Considered as integer
 }

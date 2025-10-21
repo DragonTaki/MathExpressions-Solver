@@ -78,4 +78,4 @@ std::string Format(const std::string& templateStr)
     return result;
 }
 
-} // namespace (end of Expression)
+}  // namespace (end of Expression)

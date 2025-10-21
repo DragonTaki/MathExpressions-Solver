@@ -67,4 +67,4 @@ int getConsoleWidth();
  */
 void printCandidatesInline(const std::vector<std::string>& candidates);
 
-} // namespace (end of ConsoleUtils)
+}  // namespace (end of ConsoleUtils)

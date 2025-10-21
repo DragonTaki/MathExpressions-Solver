@@ -198,7 +198,7 @@ bool updateConstraintsMapWithSingleGuess(
     return hasAnyUpdate;
 }
 
-} // namespace (end of internal helpers)
+}  // namespace (end of internal helpers)
 
 // =========================
 //  Public Functions Section
@@ -347,6 +347,13 @@ std::unordered_map<char, Constraint> deriveConstraints(
     return constraintsMap;
 }
 
+/**
+ * @brief Updates an existing constraints map using a single guess-feedback pair.
+ * @param constraintsMap Map of exprChar → Constraint to update.
+ * @param exprLine Guessed expression string.
+ * @param exprColorLine Feedback string ('g', 'y', 'r').
+ * @return true if constraints were updated; otherwise false.
+ */
 bool updateConstraint(
     std::unordered_map<char, Constraint>& constraintsMap,
     const std::string& exprLine,

@@ -100,4 +100,4 @@ void printCandidatesInline(const std::vector<std::string>& candidatesList) {
     AppLogger::Prompt(rowString, LogColor::Green);
 }
 
-} // namespace (end of ConsoleUtils)
+}  // namespace (end of ConsoleUtils)

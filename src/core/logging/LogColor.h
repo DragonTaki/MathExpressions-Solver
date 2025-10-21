@@ -33,6 +33,22 @@ enum class LogColor {
     White     ///< Default white text
 };
 
+/**
+ * @namespace ConsoleAnsi
+ * 
+ * @brief Contains ANSI escape codes for console color formatting.
+ * 
+ * <summary>
+ * Each constant represents the ANSI escape sequence for a specific text color
+ * in the console. Use these codes when printing messages to the console
+ * to change text color, and reset afterward using RESET.
+ * 
+ * Example usage:
+ * @code
+ * std::cout << ConsoleAnsi::GREEN << "Success!" << ConsoleAnsi::RESET << std::endl;
+ * @endcode
+ * </summary>
+ */
 namespace ConsoleAnsi {
     inline constexpr const char* RESET   = "\033[0m";
     inline constexpr const char* GRAY    = "\033[90m";
@@ -43,4 +59,4 @@ namespace ConsoleAnsi {
     inline constexpr const char* MAGENTA = "\033[35m";
     inline constexpr const char* CYAN    = "\033[36m";
     inline constexpr const char* WHITE   = "\033[37m";
-}
+}  // namespace (end of ConsoleAnsi)
