@@ -10,7 +10,7 @@ This project is only for private use.
 
 ## ⚙️ Project Features 專案特點
 
-本專案以 C++20 編寫，用於解析與求解《MATH EXPRESSions》遊戲的所有可能正確算式組合。
+本專案以 C++20 編寫，用於解析與求解《MATH EXPRESSions》遊戲的所有可能正確算式組合。  
 為了模擬遊戲邏輯與提供高效驗證，本程式具備以下主要特點：
 
 1. 🧠 使用 DFS（深度優先搜尋）與剪枝演算法
